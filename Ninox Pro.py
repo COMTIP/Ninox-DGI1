@@ -4,32 +4,7 @@ from datetime import datetime
 import pandas as pd
 from io import BytesIO
 
-# ========== LOGIN OBLIGATORIO ==========
-USUARIOS = {
-    "Mispanama": "Maxilo2000",
-    "usuario1": "password123"
-}
-
-if "autenticado" not in st.session_state:
-    st.session_state["autenticado"] = False
-
-if not st.session_state["autenticado"]:
-    st.markdown("<h2 style='text-align:center; color:#1c6758'>Acceso a Facturación Electrónica</h2>", unsafe_allow_html=True)
-    usuario = st.text_input("Usuario")
-    password = st.text_input("Contraseña", type="password")
-    if st.button("Ingresar"):
-        if usuario in USUARIOS and password == USUARIOS[usuario]:
-            st.session_state["autenticado"] = True
-            st.rerun()
-        else:
-            st.error("Usuario o contraseña incorrectos.")
-    st.stop()
-
-if st.sidebar.button("Cerrar sesión"):
-    st.session_state["autenticado"] = False
-    st.rerun()
-
-# ======= NINOX API CONFIG ==========
+# Configuración Ninox API
 API_TOKEN = "d3c82d50-60d4-11f0-9dd2-0154422825e5"
 TEAM_ID = "6dA5DFvfDTxCQxpDF"
 DATABASE_ID = "yoq1qy9euurq"
@@ -41,75 +16,85 @@ def get_ninox(table):
     return r.json() if r.ok else []
 
 def buscar_cliente_por_nombre(nombre, clientes):
+    nombre = nombre.strip().lower()
     for c in clientes:
-        if c["fields"].get("Nombre", "") == nombre:
+        if c["fields"].get("Nombre", "").strip().lower() == nombre:
             return c["fields"]
     return {}
 
-# ==================== MENÚ LATERAL ====================
-st.sidebar.title("Menú")
-menu = st.sidebar.radio(
-    "Seleccione una opción:",
-    ["Enviar a DGI", "Historial de envíos"]
-)
+# --------- APP ---------
+st.set_page_config(page_title="Factura desde Ninox", layout="centered")
+st.title("Factura electrónica DGI (todo desde Ninox)")
 
-# ================== ENVIAR FACTURA ======================
-if menu == "Enviar a DGI":
-    st.set_page_config(page_title="Enviar Factura Ninox a DGI", layout="centered")
-    st.title("Enviar factura existente a DGI (extraída de Ninox)")
+# Traer datos de Ninox
+facturas = get_ninox("Facturas")
+lineas = get_ninox("Líneas Factura")
+clientes = get_ninox("Clientes")
 
-    # Traer datos de Ninox
-    facturas = get_ninox("Facturas")
-    lineas = get_ninox("Líneas Factura")
-    clientes = get_ninox("Clientes")
+# Selector de factura
+nums_factura = [f["fields"].get("Factura No.", "Sin número") for f in facturas]
+if not nums_factura:
+    st.warning("No hay facturas en Ninox.")
+    st.stop()
+factura_idx = st.selectbox("Selecciona Factura", range(len(nums_factura)), format_func=lambda x: nums_factura[x])
+factura = facturas[factura_idx]["fields"]
 
-    # Mostrar selector de factura
-    nums_factura = [f["fields"].get("Factura No.", "Sin número") for f in facturas]
-    if not nums_factura:
-        st.warning("No hay facturas en Ninox.")
-        st.stop()
-    factura_idx = st.selectbox("Selecciona Factura para enviar a DGI", range(len(nums_factura)), format_func=lambda x: nums_factura[x])
-    factura = facturas[factura_idx]["fields"]
+# Extraer líneas asociadas
+lineas_factura = [l["fields"] for l in lineas if l["fields"].get("Factura No.", "") == factura["Factura No."]]
+if not lineas_factura:
+    st.warning("No hay líneas asociadas a esta factura.")
+    st.stop()
 
-    # Mostrar datos principales de la factura seleccionada
-    st.write(f"**Factura No.:** {factura.get('Factura No.', '')}")
-    st.write(f"**Fecha + Hora:** {factura.get('Fecha + Hora', '')}")
-    st.write(f"**Medio de Pago:** {factura.get('Medio de Pago', '')}")
-    st.write(f"**Total:** ${factura.get('Total', 0):,.2f}")
-    st.write(f"**Emitido por:** {factura.get('Emitido por', '')}")
+# Buscar cliente por nombre (en la PRIMERA línea)
+cliente_nombre = lineas_factura[0].get("Cliente", "")
+cliente = buscar_cliente_por_nombre(cliente_nombre, clientes)
 
-    # Buscar todas las líneas asociadas
-    lineas_factura = [l["fields"] for l in lineas if l["fields"].get("Factura No.", "") == factura["Factura No."]]
-    if not lineas_factura:
-        st.warning("No hay líneas asociadas a esta factura.")
-        st.stop()
+st.header("Datos de la factura")
+st.write(f"**Factura No.:** {factura.get('Factura No.','')}")
+st.write(f"**Fecha + Hora:** {factura.get('Fecha + Hora','')}")
+st.write(f"**Medio de Pago:** {factura.get('Medio de Pago','')}")
+st.write(f"**Total:** ${factura.get('Total', 0):,.2f}")
+st.write(f"**Emitido por:** {factura.get('Emitido por','')}")
 
-    st.write("### Detalle de la factura:")
-    df_lineas = pd.DataFrame(lineas_factura)
-    st.dataframe(df_lineas, use_container_width=True)
+st.subheader("Datos del cliente principal")
+if not cliente:
+    st.error("No se encontró el cliente en la tabla Clientes.")
+else:
+    st.write(f"**Nombre:** {cliente.get('Nombre','')}")
+    st.write(f"**RUC:** {cliente.get('RUC','')}")
+    st.write(f"**DV:** {cliente.get('DV','')}")
+    st.write(f"**Dirección:** {cliente.get('Dirección','')}")
+    st.write(f"**Teléfono:** {cliente.get('Teléfono','')}")
+    st.write(f"**Correo:** {cliente.get('Correo','')}")
 
-    # Buscar cliente principal (de la primera línea, asumiendo que todas las líneas son del mismo cliente)
-    cliente_nombre = lineas_factura[0].get("Cliente", "")
-    cliente = buscar_cliente_por_nombre(cliente_nombre, clientes)
+st.subheader("Detalle (líneas de factura)")
+if lineas_factura:
+    df = pd.DataFrame([
+        {
+            "Descripción": l.get("Descripción", ""),
+            "Cantidad": l.get("Cantidad", ""),
+            "Precio Unitario": l.get("Precio Unitario", ""),
+            "ITBMS": l.get("ITBMS", ""),
+            "Subtotal Línea": l.get("Subtotal Línea", ""),
+        }
+        for l in lineas_factura
+    ])
+    st.dataframe(df, use_container_width=True)
+else:
+    st.warning("Sin líneas de factura.")
 
-    # Validar cliente
-    if not cliente:
-        st.warning("No se encontró el cliente asociado.")
-        st.stop()
-
-    # Generar JSON para DGI
-    fecha = factura.get("Fecha + Hora", "")
-    try:
-        fecha_iso = datetime.strptime(fecha, "%m/%d/%Y %I:%M %p").strftime("%Y-%m-%dT%H:%M:%S-05:00")
-    except Exception:
-        fecha_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S-05:00")
-
+# Mostrar el JSON para la DGI
+if cliente:
     medio_pago = factura.get("Medio de Pago", "Efectivo")
     forma_pago = {
         "formaPagoFact": {"Efectivo": "01", "Débito": "02", "Crédito": "03"}.get(medio_pago, "01"),
         "valorCuotaPagada": str(factura.get("Total", 0))
     }
-
+    fecha = factura.get("Fecha + Hora", "")
+    try:
+        fecha_iso = datetime.strptime(fecha, "%m/%d/%Y %I:%M %p").strftime("%Y-%m-%dT%H:%M:%S-05:00")
+    except Exception:
+        fecha_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S-05:00")
     payload = {
         "documento": {
             "codigoSucursalEmisor": "0000",
@@ -149,8 +134,8 @@ if menu == "Enviar a DGI":
                         "cantidad": f"{l.get('Cantidad', 1):.2f}",
                         "precioUnitario": f"{l.get('Precio Unitario', 0):.2f}",
                         "precioUnitarioDescuento": "0.00",
-                        "precioItem": f"{l.get('Cantidad', 1) * l.get('Precio Unitario', 0):.2f}",
-                        "valorTotal": f"{l.get('Cantidad', 1) * l.get('Precio Unitario', 0) + l.get('ITBMS', 0):.2f}",
+                        "precioItem": f"{float(l.get('Cantidad', 1)) * float(l.get('Precio Unitario', 0)):.2f}",
+                        "valorTotal": f"{float(l.get('Cantidad', 1)) * float(l.get('Precio Unitario', 0)) + float(l.get('ITBMS', 0)):.2f}",
                         "cantGTINCom": f"{l.get('Cantidad', 1):.2f}",
                         "codigoGTINInv": "0",
                         "tasaITBMS": "01" if l.get("ITBMS", 0) > 0 else "00",
@@ -161,8 +146,8 @@ if menu == "Enviar a DGI":
             },
             "totalesSubTotales": {
                 "totalPrecioNeto": f"{factura.get('Total', 0):.2f}",
-                "totalITBMS": f"{sum(l.get('ITBMS', 0) for l in lineas_factura):.2f}",
-                "totalMontoGravado": f"{sum(l.get('ITBMS', 0) for l in lineas_factura):.2f}",
+                "totalITBMS": f"{sum(float(l.get('ITBMS', 0)) for l in lineas_factura):.2f}",
+                "totalMontoGravado": f"{sum(float(l.get('ITBMS', 0)) for l in lineas_factura):.2f}",
                 "totalDescuento": "0.00",
                 "totalAcarreoCobrado": "0.00",
                 "valorSeguroCobrado": "0.00",
@@ -178,9 +163,9 @@ if menu == "Enviar a DGI":
             }
         }
     }
-
-    st.subheader("JSON generado para la DGI")
+    st.subheader("JSON para DGI")
     st.json(payload)
+
 
     # ========== ENVÍO A DGI ==========
     if st.button("Enviar a DGI"):
