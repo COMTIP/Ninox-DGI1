@@ -29,7 +29,7 @@ if st.sidebar.button("Cerrar sesión"):
     st.session_state["autenticado"] = False
     st.rerun()
 
-# ======= NINOX API CONFIG ==========
+# ========== NINOX API CONFIG ==========
 API_TOKEN = "d3c82d50-60d4-11f0-9dd2-0154422825e5"
 TEAM_ID = "6dA5DFvfDTxCQxpDF"
 DATABASE_ID = "yoq1qy9euurq"
@@ -122,9 +122,9 @@ if menu == "Facturación":
     if 'items' not in st.session_state:
         st.session_state['items'] = []
 
-    st.markdown("### Agregar Productos a la Factura")
+    st.markdown("### Agregar Productos/Servicios a la Factura")
     nombres_productos = [f"{p['fields'].get('Código','')} | {p['fields'].get('Descripción','')}" for p in productos]
-    prod_idx = st.selectbox("Producto", range(len(nombres_productos)), format_func=lambda x: nombres_productos[x])
+    prod_idx = st.selectbox("Producto/Servicio", range(len(nombres_productos)), format_func=lambda x: nombres_productos[x])
     prod_elegido = productos[prod_idx]['fields']
     cantidad = st.number_input("Cantidad", min_value=1.0, value=1.0, step=1.0)
     if st.button("Agregar ítem"):
@@ -133,14 +133,15 @@ if menu == "Facturación":
             "descripcion": prod_elegido.get('Descripción', ''),
             "cantidad": cantidad,
             "precioUnitario": float(prod_elegido.get('Precio Unitario', 0)),
-            "valorITBMS": float(prod_elegido.get('ITBMS', 0))
+            "valorITBMS": float(prod_elegido.get('ITBMS', 0)),
+            "cliente": cliente.get('Nombre', '')
         })
 
     # --- Mostrar Items ---
     if st.session_state['items']:
-        st.write("#### Ítems de la factura")
+        st.write("#### Ítems agregados a la factura")
         for idx, i in enumerate(st.session_state['items']):
-            st.write(f"{idx+1}. {i['codigo']} | {i['descripcion']} | {i['cantidad']} | {i['precioUnitario']} | {i['valorITBMS']}")
+            st.write(f"{idx+1}. {i['codigo']} | {i['descripcion']} | {i['cantidad']} | {i['precioUnitario']} | {i['valorITBMS']} | {i['cliente']}")
         if st.button("Limpiar Ítems"):
             st.session_state['items'] = []
 
@@ -168,7 +169,7 @@ if menu == "Facturación":
         if not st.session_state["emisor"].strip():
             st.error("Debe ingresar el nombre de quien emite la factura antes de enviarla.")
         elif not st.session_state['items']:
-            st.error("Debe agregar al menos un producto.")
+            st.error("Debe agregar al menos un producto o servicio.")
         else:
             # Refresca el correlativo real antes de enviar
             facturas_actualizadas = obtener_facturas_actualizadas()
@@ -274,10 +275,17 @@ elif menu == "Ver historial":
     # Cargar historial local de la sesión
     historial = st.session_state.get("historial", [])
 
-    if not historial:
-        st.info("No hay facturas enviadas en esta sesión.")
+    # Permite filtrar por cliente si lo deseas
+    filtro_cliente = st.text_input("Filtrar por cliente (opcional):", "")
+    if filtro_cliente:
+        filtrado = [h for h in historial if filtro_cliente.lower() in h["Cliente"].lower()]
+        df = pd.DataFrame(filtrado)
     else:
         df = pd.DataFrame(historial)
+
+    if df.empty:
+        st.info("No hay facturas enviadas en esta sesión o filtro.")
+    else:
         st.dataframe(df, use_container_width=True)
 
         # Descargar como Excel
