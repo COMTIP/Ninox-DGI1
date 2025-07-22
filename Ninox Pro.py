@@ -56,7 +56,7 @@ if "clientes" not in st.session_state:
 if "facturas" not in st.session_state:
     st.session_state["facturas"] = obtener_tabla("Facturas")
 if "lineasfactura" not in st.session_state:
-    st.session_state["lineasfactura"] = obtener_tabla("LineasFactura")  # Asegúrate del nombre exacto en Ninox
+    st.session_state["lineasfactura"] = obtener_tabla("Líneas Factura") 
 
 clientes = st.session_state["clientes"]
 facturas = st.session_state["facturas"]
