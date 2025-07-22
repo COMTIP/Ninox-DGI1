@@ -42,14 +42,15 @@ st.sidebar.write("Solo Facturación")
 
 st.title("Facturación DGI - Seleccione No. de Factura")
 
-# --- Leer tablas ---
-facturas_raw = obtener_tabla("Facturas")
-clientes_raw = obtener_tabla("Clientes")
-lineasfactura_raw = obtener_tabla("LíneasFactura")
+# --- Leer tablas (usa los módulos correctos) ---
+facturas_raw = obtener_tabla("Facturas")     # E
+clientes_raw = obtener_tabla("Clientes")     # B
+productos_raw = obtener_tabla("Productos")   # D
+lineasfactura_raw = obtener_tabla("LineasFactura") # F
 
 # Mostrar ejemplo para diagnóstico
 if lineasfactura_raw:
-    st.write("Ejemplo de línea de factura desde Ninox:", lineasfactura_raw[:2])
+    st.write("Diagnóstico: líneas de factura recibidas:", lineasfactura_raw[:2])
 
 # Índices para fácil acceso
 clientes_dict = {c["fields"]["Nombre"]: c["fields"] for c in clientes_raw if "Nombre" in c["fields"]}
@@ -61,8 +62,7 @@ factura_no = st.selectbox("Seleccione Número de Factura", factura_numeros)
 if not factura_no:
     st.stop()
 
-# --- Buscar nombre exacto del campo en LíneasFactura ---
-# Normalmente "Factura No." o "Factura", busca el primero que encuentre:
+# --- Buscar nombre exacto del campo en LineasFactura ---
 campo_factura_no = None
 if lineasfactura_raw:
     posibles_nombres = [k for k in lineasfactura_raw[0]["fields"].keys() if "factura" in k.lower()]
@@ -79,7 +79,7 @@ if not lineas:
     st.warning(f"No hay líneas asociadas a la factura seleccionada ({factura_no}).")
     st.stop()
 
-# --- 3. Cliente ---
+# --- Cliente ---
 cliente_nombre = lineas[0].get("Cliente", "")
 cliente = clientes_dict.get(cliente_nombre, {})
 
@@ -113,7 +113,7 @@ for l in lineas:
 df = pd.DataFrame(detalle)
 st.dataframe(df, use_container_width=True)
 
-# --- 1. Datos de la Factura ---
+# --- Cabecera Factura ---
 datos_factura = facturas_dict[factura_no]
 medio_pago = datos_factura.get('Medio de Pago', '')
 total_factura = float(datos_factura.get('Total', 0))
@@ -213,5 +213,4 @@ if st.button("Enviar Factura a DGI"):
         st.success(f"Respuesta DGI: {response.text}")
     except Exception as e:
         st.error(f"Error al enviar: {str(e)}")
-
 
