@@ -42,19 +42,15 @@ st.sidebar.write("Solo Facturación")
 
 st.title("Facturación DGI - Seleccione No. de Factura")
 
-# --- Leer tablas (usa los módulos correctos) ---
-facturas_raw = obtener_tabla("Facturas")     # E
-clientes_raw = obtener_tabla("Clientes")     # B
-productos_raw = obtener_tabla("Productos")   # D
-lineasfactura_raw = obtener_tabla("LineasFactura") # F
+# --- Leer tablas ---
+facturas_raw = obtener_tabla("Facturas")
+clientes_raw = obtener_tabla("Clientes")
+productos_raw = obtener_tabla("Productos")
+lineasfactura_raw = obtener_tabla("LineasFactura")
 
-# Mostrar ejemplo para diagnóstico
-if lineasfactura_raw:
-    st.write("Diagnóstico: líneas de factura recibidas:", lineasfactura_raw[:2])
-
-# Índices para fácil acceso
-clientes_dict = {c["fields"]["Nombre"]: c["fields"] for c in clientes_raw if "Nombre" in c["fields"]}
+# Convertir para acceso rápido
 facturas_dict = {f["fields"]["Factura No."]: f["fields"] for f in facturas_raw if "Factura No." in f["fields"]}
+clientes_dict = {c["fields"]["Nombre"]: c["fields"] for c in clientes_raw if "Nombre" in c["fields"]}
 
 factura_numeros = sorted(list(facturas_dict.keys()))
 
@@ -62,34 +58,27 @@ factura_no = st.selectbox("Seleccione Número de Factura", factura_numeros)
 if not factura_no:
     st.stop()
 
-# --- Buscar nombre exacto del campo en LineasFactura ---
-campo_factura_no = None
-if lineasfactura_raw:
-    posibles_nombres = [k for k in lineasfactura_raw[0]["fields"].keys() if "factura" in k.lower()]
-    campo_factura_no = posibles_nombres[0] if posibles_nombres else "Factura No."
-else:
-    campo_factura_no = "Factura No."
-
-def iguala_formato(a, b):
-    return str(a).strip().zfill(8) == str(b).strip().zfill(8)
-
-lineas = [l["fields"] for l in lineasfactura_raw if iguala_formato(l["fields"].get(campo_factura_no, ""), factura_no)]
+# Buscar líneas asociadas a esa factura (campo: Factura No.)
+lineas = [l["fields"] for l in lineasfactura_raw if str(l["fields"].get("Factura No.", "")).zfill(8) == factura_no]
 
 if not lineas:
     st.warning(f"No hay líneas asociadas a la factura seleccionada ({factura_no}).")
     st.stop()
 
-# --- Cliente ---
+# --- Cliente (tomo el primero de las líneas, si hay varios deberían ser iguales) ---
 cliente_nombre = lineas[0].get("Cliente", "")
 cliente = clientes_dict.get(cliente_nombre, {})
 
 st.markdown("### Datos del Cliente")
-st.write(f"**Nombre:** {cliente.get('Nombre', '')}")
-st.write(f"**RUC:** {cliente.get('RUC', '')}")
-st.write(f"**DV:** {cliente.get('DV', '')}")
-st.write(f"**Dirección:** {cliente.get('Dirección', '')}")
-st.write(f"**Teléfono:** {cliente.get('Teléfono', '')}")
-st.write(f"**Correo:** {cliente.get('Correo', '')}")
+col1, col2 = st.columns(2)
+with col1:
+    st.write(f"**Nombre:** {cliente.get('Nombre', '')}")
+    st.write(f"**RUC:** {cliente.get('RUC', '')}")
+    st.write(f"**DV:** {cliente.get('DV', '')}")
+with col2:
+    st.write(f"**Dirección:** {cliente.get('Dirección', '')}")
+    st.write(f"**Teléfono:** {cliente.get('Teléfono', '')}")
+    st.write(f"**Correo:** {cliente.get('Correo', '')}")
 
 st.markdown("### Detalle de Productos / Servicios")
 detalle = []
@@ -110,6 +99,7 @@ for l in lineas:
     })
     total_neto += cantidad * precio_unitario
     total_itbms += itbms
+
 df = pd.DataFrame(detalle)
 st.dataframe(df, use_container_width=True)
 
@@ -119,12 +109,11 @@ medio_pago = datos_factura.get('Medio de Pago', '')
 total_factura = float(datos_factura.get('Total', 0))
 emitido_por = datos_factura.get('Emitido por', '')
 
-st.write(f"**Total Neto:** {total_neto:.2f}   **ITBMS:** {total_itbms:.2f}   **Total a Pagar:** {total_neto + total_itbms:.2f}")
-
 st.markdown("### Resumen de la Factura")
 st.write(f"**Medio de Pago:** {medio_pago}")
 st.write(f"**Total:** ${total_factura:.2f}")
 st.write(f"**Emitido por:** {emitido_por}")
+st.write(f"**Total Neto:** {total_neto:.2f}   **ITBMS:** {total_itbms:.2f}   **Total a Pagar:** {total_neto + total_itbms:.2f}")
 
 # ------- Construir JSON para DGI -------
 def construir_payload_DGI():
