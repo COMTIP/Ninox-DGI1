@@ -29,273 +29,194 @@ if st.sidebar.button("Cerrar sesión"):
     st.session_state["autenticado"] = False
     st.rerun()
 
-# ========== NINOX API CONFIG ==========
+# ======= NINOX API CONFIG ==========
 API_TOKEN = "d3c82d50-60d4-11f0-9dd2-0154422825e5"
 TEAM_ID = "6dA5DFvfDTxCQxpDF"
 DATABASE_ID = "yoq1qy9euurq"
 
-def obtener_clientes():
-    url = f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/Clientes/records"
+def get_ninox(table):
+    url = f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/{table}/records"
     headers = {"Authorization": f"Bearer {API_TOKEN}"}
     r = requests.get(url, headers=headers)
     return r.json() if r.ok else []
 
-def obtener_productos():
-    url = f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/Productos/records"
-    headers = {"Authorization": f"Bearer {API_TOKEN}"}
-    r = requests.get(url, headers=headers)
-    return r.json() if r.ok else []
-
-def obtener_facturas():
-    url = f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/Facturas/records"
-    headers = {"Authorization": f"Bearer {API_TOKEN}"}
-    r = requests.get(url, headers=headers)
-    return r.json() if r.ok else []
-
-def calcular_siguiente_factura_no(facturas):
-    max_factura = 0
-    for f in facturas:
-        valor = f["fields"].get("Factura No.", "")
-        try:
-            n = int(valor)
-            if n > max_factura:
-                max_factura = n
-        except Exception:
-            continue
-    return f"{max_factura + 1:08d}"
+def buscar_cliente_por_nombre(nombre, clientes):
+    for c in clientes:
+        if c["fields"].get("Nombre", "") == nombre:
+            return c["fields"]
+    return {}
 
 # ==================== MENÚ LATERAL ====================
 st.sidebar.title("Menú")
 menu = st.sidebar.radio(
     "Seleccione una opción:",
-    ["Facturación", "Ver historial"]
+    ["Enviar a DGI", "Historial de envíos"]
 )
 
-# ================== FACTURACIÓN ======================
-if menu == "Facturación":
-    st.set_page_config(page_title="Factura Electrónica Ninox + DGI", layout="centered")
-    st.title("Factura Electrónica")
+# ================== ENVIAR FACTURA ======================
+if menu == "Enviar a DGI":
+    st.set_page_config(page_title="Enviar Factura Ninox a DGI", layout="centered")
+    st.title("Enviar factura existente a DGI (extraída de Ninox)")
 
-    if st.button("Actualizar datos de Ninox"):
-        st.session_state.pop("clientes", None)
-        st.session_state.pop("productos", None)
-        st.session_state.pop("facturas", None)
+    # Traer datos de Ninox
+    facturas = get_ninox("Facturas")
+    lineas = get_ninox("Líneas Factura")
+    clientes = get_ninox("Clientes")
 
-    if "clientes" not in st.session_state:
-        st.session_state["clientes"] = obtener_clientes()
-    if "productos" not in st.session_state:
-        st.session_state["productos"] = obtener_productos()
-    if "facturas" not in st.session_state:
-        st.session_state["facturas"] = obtener_facturas()
-
-    clientes = st.session_state["clientes"]
-    productos = st.session_state["productos"]
-    facturas = st.session_state["facturas"]
-
-    if not clientes:
-        st.warning("No hay clientes en Ninox")
+    # Mostrar selector de factura
+    nums_factura = [f["fields"].get("Factura No.", "Sin número") for f in facturas]
+    if not nums_factura:
+        st.warning("No hay facturas en Ninox.")
         st.stop()
-    if not productos:
-        st.warning("No hay productos en Ninox")
+    factura_idx = st.selectbox("Selecciona Factura para enviar a DGI", range(len(nums_factura)), format_func=lambda x: nums_factura[x])
+    factura = facturas[factura_idx]["fields"]
+
+    # Mostrar datos principales de la factura seleccionada
+    st.write(f"**Factura No.:** {factura.get('Factura No.', '')}")
+    st.write(f"**Fecha + Hora:** {factura.get('Fecha + Hora', '')}")
+    st.write(f"**Medio de Pago:** {factura.get('Medio de Pago', '')}")
+    st.write(f"**Total:** ${factura.get('Total', 0):,.2f}")
+    st.write(f"**Emitido por:** {factura.get('Emitido por', '')}")
+
+    # Buscar todas las líneas asociadas
+    lineas_factura = [l["fields"] for l in lineas if l["fields"].get("Factura No.", "") == factura["Factura No."]]
+    if not lineas_factura:
+        st.warning("No hay líneas asociadas a esta factura.")
         st.stop()
 
-    # Selección de Cliente
-    nombres_clientes = [c['fields']['Nombre'] for c in clientes]
-    cliente_idx = st.selectbox("Seleccione Cliente", range(len(nombres_clientes)), format_func=lambda x: nombres_clientes[x])
-    cliente = clientes[cliente_idx]["fields"]
+    st.write("### Detalle de la factura:")
+    df_lineas = pd.DataFrame(lineas_factura)
+    st.dataframe(df_lineas, use_container_width=True)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.text_input("RUC", value=cliente.get('RUC', ''), disabled=True)
-        st.text_input("DV", value=cliente.get('DV', ''), disabled=True)
-        st.text_area("Dirección", value=cliente.get('Dirección', ''), disabled=True)
-    with col2:
-        st.text_input("Teléfono", value=cliente.get('Teléfono', ''), disabled=True)
-        st.text_input("Correo", value=cliente.get('Correo', ''), disabled=True)
+    # Buscar cliente principal (de la primera línea, asumiendo que todas las líneas son del mismo cliente)
+    cliente_nombre = lineas_factura[0].get("Cliente", "")
+    cliente = buscar_cliente_por_nombre(cliente_nombre, clientes)
 
-    # --- Factura No y Fecha (no editable, siempre actualizado antes de enviar) ---
-    factura_no_preview = calcular_siguiente_factura_no(facturas)
-    st.text_input("Factura No.", value=factura_no_preview, disabled=True)
-    fecha_emision = st.date_input("Fecha Emisión", value=datetime.today())
+    # Validar cliente
+    if not cliente:
+        st.warning("No se encontró el cliente asociado.")
+        st.stop()
 
-    # --- AGREGAR PRODUCTOS (Items) ---
-    if 'items' not in st.session_state:
-        st.session_state['items'] = []
+    # Generar JSON para DGI
+    fecha = factura.get("Fecha + Hora", "")
+    try:
+        fecha_iso = datetime.strptime(fecha, "%m/%d/%Y %I:%M %p").strftime("%Y-%m-%dT%H:%M:%S-05:00")
+    except Exception:
+        fecha_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S-05:00")
 
-    st.markdown("### Agregar Productos/Servicios a la Factura")
-    nombres_productos = [f"{p['fields'].get('Código','')} | {p['fields'].get('Descripción','')}" for p in productos]
-    prod_idx = st.selectbox("Producto/Servicio", range(len(nombres_productos)), format_func=lambda x: nombres_productos[x])
-    prod_elegido = productos[prod_idx]['fields']
-    cantidad = st.number_input("Cantidad", min_value=1.0, value=1.0, step=1.0)
-    if st.button("Agregar ítem"):
-        st.session_state['items'].append({
-            "codigo": prod_elegido.get('Código', ''),
-            "descripcion": prod_elegido.get('Descripción', ''),
-            "cantidad": cantidad,
-            "precioUnitario": float(prod_elegido.get('Precio Unitario', 0)),
-            "valorITBMS": float(prod_elegido.get('ITBMS', 0)),
-            "cliente": cliente.get('Nombre', '')
-        })
+    medio_pago = factura.get("Medio de Pago", "Efectivo")
+    forma_pago = {
+        "formaPagoFact": {"Efectivo": "01", "Débito": "02", "Crédito": "03"}.get(medio_pago, "01"),
+        "valorCuotaPagada": str(factura.get("Total", 0))
+    }
 
-    # --- Mostrar Items ---
-    if st.session_state['items']:
-        st.write("#### Ítems agregados a la factura")
-        for idx, i in enumerate(st.session_state['items']):
-            st.write(f"{idx+1}. {i['codigo']} | {i['descripcion']} | {i['cantidad']} | {i['precioUnitario']} | {i['valorITBMS']} | {i['cliente']}")
-        if st.button("Limpiar Ítems"):
-            st.session_state['items'] = []
-
-    total_neto = sum(i["cantidad"] * i["precioUnitario"] for i in st.session_state['items'])
-    total_itbms = sum(i["valorITBMS"] for i in st.session_state['items'])
-    total_factura = total_neto + total_itbms
-
-    st.write(f"**Total Neto:** {total_neto:.2f}   **ITBMS:** {total_itbms:.2f}   **Total a Pagar:** {total_factura:.2f}")
-
-    medio_pago = st.selectbox("Medio de Pago", ["Efectivo", "Débito", "Crédito"])
-
-    # ----------- EMISOR OBLIGATORIO SOLO PARA HISTORIAL ----------
-    if "emisor" not in st.session_state:
-        st.session_state["emisor"] = ""
-    st.session_state["emisor"] = st.text_input("Nombre de quien emite la factura (obligatorio)", value=st.session_state["emisor"])
-
-    # --- Enviar a DGI ---
-    def obtener_facturas_actualizadas():
-        url = f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/Facturas/records"
-        headers = {"Authorization": f"Bearer {API_TOKEN}"}
-        r = requests.get(url, headers=headers)
-        return r.json() if r.ok else []
-
-    if st.button("Enviar Factura a DGI"):
-        if not st.session_state["emisor"].strip():
-            st.error("Debe ingresar el nombre de quien emite la factura antes de enviarla.")
-        elif not st.session_state['items']:
-            st.error("Debe agregar al menos un producto o servicio.")
-        else:
-            # Refresca el correlativo real antes de enviar
-            facturas_actualizadas = obtener_facturas_actualizadas()
-            factura_no_final = calcular_siguiente_factura_no(facturas_actualizadas)
-            forma_pago = {
-                "formaPagoFact": {"Efectivo": "01", "Débito": "02", "Crédito": "03"}[medio_pago],
-                "valorCuotaPagada": f"{total_factura:.2f}"
-            }
-            payload = {
-                "documento": {
-                    "codigoSucursalEmisor": "0000",
-                    "tipoSucursal": "1",
-                    "datosTransaccion": {
-                        "tipoEmision": "01",
-                        "tipoDocumento": "01",
-                        "numeroDocumentoFiscal": factura_no_final,
-                        "puntoFacturacionFiscal": "001",
-                        "naturalezaOperacion": "01",
-                        "tipoOperacion": 1,
-                        "destinoOperacion": 1,
-                        "formatoCAFE": 1,
-                        "entregaCAFE": 1,
-                        "envioContenedor": 1,
-                        "procesoGeneracion": 1,
-                        "tipoVenta": 1,
-                        "fechaEmision": str(fecha_emision) + "T09:00:00-05:00",
-                        "cliente": {
-                            "tipoClienteFE": "02",
-                            "tipoContribuyente": 1,
-                            "numeroRUC": cliente.get('RUC', '').replace("-", ""),
-                            "digitoVerificadorRUC": cliente.get('DV', ''),
-                            "razonSocial": cliente.get('Nombre', ''),
-                            "direccion": cliente.get('Dirección', ''),
-                            "telefono1": cliente.get('Teléfono', ''),
-                            "correoElectronico1": cliente.get('Correo', ''),
-                            "pais": "PA"
-                        }
-                    },
-                    "listaItems": {
-                        "item": [
-                            {
-                                "codigo": i["codigo"],
-                                "descripcion": i["descripcion"],
-                                "codigoGTIN": "0",
-                                "cantidad": f"{i['cantidad']:.2f}",
-                                "precioUnitario": f"{i['precioUnitario']:.2f}",
-                                "precioUnitarioDescuento": "0.00",
-                                "precioItem": f"{i['cantidad'] * i['precioUnitario']:.2f}",
-                                "valorTotal": f"{i['cantidad'] * i['precioUnitario'] + i['valorITBMS']:.2f}",
-                                "cantGTINCom": f"{i['cantidad']:.2f}",
-                                "codigoGTINInv": "0",
-                                "tasaITBMS": "01" if i["valorITBMS"] > 0 else "00",
-                                "valorITBMS": f"{i['valorITBMS']:.2f}",
-                                "cantGTINComInv": f"{i['cantidad']:.2f}"
-                            } for i in st.session_state['items']
-                        ]
-                    },
-                    "totalesSubTotales": {
-                        "totalPrecioNeto": f"{total_neto:.2f}",
-                        "totalITBMS": f"{total_itbms:.2f}",
-                        "totalMontoGravado": f"{total_itbms:.2f}",
-                        "totalDescuento": "0.00",
-                        "totalAcarreoCobrado": "0.00",
-                        "valorSeguroCobrado": "0.00",
-                        "totalFactura": f"{total_factura:.2f}",
-                        "totalValorRecibido": f"{total_factura:.2f}",
-                        "vuelto": "0.00",
-                        "tiempoPago": "1",
-                        "nroItems": str(len(st.session_state['items'])),
-                        "totalTodosItems": f"{total_factura:.2f}",
-                        "listaFormaPago": {
-                            "formaPago": [forma_pago]
-                        }
-                    }
+    payload = {
+        "documento": {
+            "codigoSucursalEmisor": "0000",
+            "tipoSucursal": "1",
+            "datosTransaccion": {
+                "tipoEmision": "01",
+                "tipoDocumento": "01",
+                "numeroDocumentoFiscal": factura.get("Factura No.", ""),
+                "puntoFacturacionFiscal": "001",
+                "naturalezaOperacion": "01",
+                "tipoOperacion": 1,
+                "destinoOperacion": 1,
+                "formatoCAFE": 1,
+                "entregaCAFE": 1,
+                "envioContenedor": 1,
+                "procesoGeneracion": 1,
+                "tipoVenta": 1,
+                "fechaEmision": fecha_iso,
+                "cliente": {
+                    "tipoClienteFE": "02",
+                    "tipoContribuyente": 1,
+                    "numeroRUC": cliente.get('RUC', '').replace("-", ""),
+                    "digitoVerificadorRUC": cliente.get('DV', ''),
+                    "razonSocial": cliente.get('Nombre', ''),
+                    "direccion": cliente.get('Dirección', ''),
+                    "telefono1": cliente.get('Teléfono', ''),
+                    "correoElectronico1": cliente.get('Correo', ''),
+                    "pais": "PA"
+                }
+            },
+            "listaItems": {
+                "item": [
+                    {
+                        "codigo": l.get("Código", ""),
+                        "descripcion": l.get("Descripción", ""),
+                        "codigoGTIN": "0",
+                        "cantidad": f"{l.get('Cantidad', 1):.2f}",
+                        "precioUnitario": f"{l.get('Precio Unitario', 0):.2f}",
+                        "precioUnitarioDescuento": "0.00",
+                        "precioItem": f"{l.get('Cantidad', 1) * l.get('Precio Unitario', 0):.2f}",
+                        "valorTotal": f"{l.get('Cantidad', 1) * l.get('Precio Unitario', 0) + l.get('ITBMS', 0):.2f}",
+                        "cantGTINCom": f"{l.get('Cantidad', 1):.2f}",
+                        "codigoGTINInv": "0",
+                        "tasaITBMS": "01" if l.get("ITBMS", 0) > 0 else "00",
+                        "valorITBMS": f"{l.get('ITBMS', 0):.2f}",
+                        "cantGTINComInv": f"{l.get('Cantidad', 1):.2f}"
+                    } for l in lineas_factura
+                ]
+            },
+            "totalesSubTotales": {
+                "totalPrecioNeto": f"{factura.get('Total', 0):.2f}",
+                "totalITBMS": f"{sum(l.get('ITBMS', 0) for l in lineas_factura):.2f}",
+                "totalMontoGravado": f"{sum(l.get('ITBMS', 0) for l in lineas_factura):.2f}",
+                "totalDescuento": "0.00",
+                "totalAcarreoCobrado": "0.00",
+                "valorSeguroCobrado": "0.00",
+                "totalFactura": f"{factura.get('Total', 0):.2f}",
+                "totalValorRecibido": f"{factura.get('Total', 0):.2f}",
+                "vuelto": "0.00",
+                "tiempoPago": "1",
+                "nroItems": str(len(lineas_factura)),
+                "totalTodosItems": f"{factura.get('Total', 0):.2f}",
+                "listaFormaPago": {
+                    "formaPago": [forma_pago]
                 }
             }
-            st.write("JSON enviado:")
-            st.json(payload)
-            url = "https://ninox-factory-server.onrender.com/enviar-factura"
-            try:
-                response = requests.post(url, json=payload)
-                st.success(f"Respuesta: {response.text}")
-                # Guarda en historial local para tu control
-                if "historial" not in st.session_state:
-                    st.session_state["historial"] = []
-                st.session_state["historial"].append({
-                    "Factura No.": factura_no_final,
-                    "Cliente": cliente.get("Nombre", ""),
-                    "Fecha": str(fecha_emision),
-                    "Total Neto": f"{total_neto:.2f}",
-                    "Medio de Pago": medio_pago,
-                    "Emitido por": st.session_state["emisor"]
-                })
-                # Refresca facturas
-                st.session_state["facturas"] = obtener_facturas_actualizadas()
-            except Exception as e:
-                st.error(f"Error: {str(e)}")
+        }
+    }
+
+    st.subheader("JSON generado para la DGI")
+    st.json(payload)
+
+    # ========== ENVÍO A DGI ==========
+    if st.button("Enviar a DGI"):
+        url = "https://ninox-factory-server.onrender.com/enviar-factura"
+        try:
+            response = requests.post(url, json=payload)
+            st.success(f"Respuesta DGI: {response.text}")
+            # Guardar en historial
+            if "historial" not in st.session_state:
+                st.session_state["historial"] = []
+            st.session_state["historial"].append({
+                "Factura No.": factura.get("Factura No.", ""),
+                "Cliente": cliente.get("Nombre", ""),
+                "Fecha": fecha_iso,
+                "Total": factura.get("Total", 0),
+                "Respuesta DGI": response.text
+            })
+        except Exception as e:
+            st.error(f"Error enviando a DGI: {str(e)}")
 
 # ================== HISTORIAL =======================
-elif menu == "Ver historial":
-    st.title("Historial de facturas enviadas")
-
-    # Cargar historial local de la sesión
+elif menu == "Historial de envíos":
+    st.title("Historial de facturas enviadas a la DGI")
     historial = st.session_state.get("historial", [])
-
-    # Permite filtrar por cliente si lo deseas
-    filtro_cliente = st.text_input("Filtrar por cliente (opcional):", "")
-    if filtro_cliente:
-        filtrado = [h for h in historial if filtro_cliente.lower() in h["Cliente"].lower()]
-        df = pd.DataFrame(filtrado)
+    if not historial:
+        st.info("No hay envíos en esta sesión.")
     else:
         df = pd.DataFrame(historial)
-
-    if df.empty:
-        st.info("No hay facturas enviadas en esta sesión o filtro.")
-    else:
         st.dataframe(df, use_container_width=True)
-
-        # Descargar como Excel
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False)
         st.download_button(
             label="Descargar historial en Excel",
             data=output.getvalue(),
-            file_name='historial_facturas.xlsx',
+            file_name='historial_envios.xlsx',
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
 
