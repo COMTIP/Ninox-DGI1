@@ -194,7 +194,7 @@ st.write("JSON DGI:", payload)
 if st.button("Enviar Factura a DGI"):
     st.subheader("JSON enviado a la DGI")
     st.json(payload)
-            url = "https://ninox-factory-server.onrender.com/enviar-factura"
+     url = "https://ninox-factory-server.onrender.com/enviar-factura"
             try:
                 response = requests.post(url, json=payload)
                 st.success(f"Respuesta: {response.text}")
