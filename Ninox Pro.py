@@ -29,7 +29,7 @@ if st.sidebar.button("Cerrar sesión"):
     st.session_state["autenticado"] = False
     st.rerun()
 
-# ======= NINOX API CONFIG ==========
+# ========== NINOX API CONFIG ==========
 API_TOKEN = "d3c82d50-60d4-11f0-9dd2-0154422825e5"
 TEAM_ID = "6dA5DFvfDTxCQxpDF"
 DATABASE_ID = "yoq1qy9euurq"
@@ -38,25 +38,19 @@ def obtener_clientes():
     url = f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/Clientes/records"
     headers = {"Authorization": f"Bearer {API_TOKEN}"}
     r = requests.get(url, headers=headers)
-    if r.ok:
-        return r.json()
-    return []
+    return r.json() if r.ok else []
 
 def obtener_productos():
     url = f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/Productos/records"
     headers = {"Authorization": f"Bearer {API_TOKEN}"}
     r = requests.get(url, headers=headers)
-    if r.ok:
-        return r.json()
-    return []
+    return r.json() if r.ok else []
 
 def obtener_facturas():
     url = f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/Facturas/records"
     headers = {"Authorization": f"Bearer {API_TOKEN}"}
     r = requests.get(url, headers=headers)
-    if r.ok:
-        return r.json()
-    return []
+    return r.json() if r.ok else []
 
 def calcular_siguiente_factura_no(facturas):
     max_factura = 0
@@ -79,7 +73,6 @@ menu = st.sidebar.radio(
 
 # ================== FACTURACIÓN ======================
 if menu == "Facturación":
-
     st.set_page_config(page_title="Factura Electrónica Ninox + DGI", layout="centered")
     st.title("Factura Electrónica")
 
@@ -169,9 +162,7 @@ if menu == "Facturación":
         url = f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/Facturas/records"
         headers = {"Authorization": f"Bearer {API_TOKEN}"}
         r = requests.get(url, headers=headers)
-        if r.ok:
-            return r.json()
-        return []
+        return r.json() if r.ok else []
 
     if st.button("Enviar Factura a DGI"):
         if not st.session_state["emisor"].strip():
@@ -299,5 +290,4 @@ elif menu == "Ver historial":
             file_name='historial_facturas.xlsx',
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
-
 
