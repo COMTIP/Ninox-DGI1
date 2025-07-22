@@ -47,27 +47,36 @@ facturas_raw = obtener_tabla("Facturas")
 clientes_raw = obtener_tabla("Clientes")
 lineasfactura_raw = obtener_tabla("LíneasFactura")
 
+# Mostrar ejemplo para diagnóstico
+if lineasfactura_raw:
+    st.write("Ejemplo de línea de factura desde Ninox:", lineasfactura_raw[:2])
+
 # Índices para fácil acceso
 clientes_dict = {c["fields"]["Nombre"]: c["fields"] for c in clientes_raw if "Nombre" in c["fields"]}
 facturas_dict = {f["fields"]["Factura No."]: f["fields"] for f in facturas_raw if "Factura No." in f["fields"]}
 
 factura_numeros = sorted(list(facturas_dict.keys()))
 
-# --- Seleccionar Factura ---
 factura_no = st.selectbox("Seleccione Número de Factura", factura_numeros)
 if not factura_no:
     st.stop()
 
-# --- 1. Datos de la Factura ---
-datos_factura = facturas_dict[factura_no]
-medio_pago = datos_factura.get('Medio de Pago', '')
-total_factura = float(datos_factura.get('Total', 0))
-emitido_por = datos_factura.get('Emitido por', '')
+# --- Buscar nombre exacto del campo en LíneasFactura ---
+# Normalmente "Factura No." o "Factura", busca el primero que encuentre:
+campo_factura_no = None
+if lineasfactura_raw:
+    posibles_nombres = [k for k in lineasfactura_raw[0]["fields"].keys() if "factura" in k.lower()]
+    campo_factura_no = posibles_nombres[0] if posibles_nombres else "Factura No."
+else:
+    campo_factura_no = "Factura No."
 
-# --- 2. Líneas de Factura ---
-lineas = [l["fields"] for l in lineasfactura_raw if l["fields"].get("Factura No.") == factura_no]
+def iguala_formato(a, b):
+    return str(a).strip().zfill(8) == str(b).strip().zfill(8)
+
+lineas = [l["fields"] for l in lineasfactura_raw if iguala_formato(l["fields"].get(campo_factura_no, ""), factura_no)]
+
 if not lineas:
-    st.warning("No hay líneas asociadas a esta factura.")
+    st.warning(f"No hay líneas asociadas a la factura seleccionada ({factura_no}).")
     st.stop()
 
 # --- 3. Cliente ---
@@ -103,6 +112,12 @@ for l in lineas:
     total_itbms += itbms
 df = pd.DataFrame(detalle)
 st.dataframe(df, use_container_width=True)
+
+# --- 1. Datos de la Factura ---
+datos_factura = facturas_dict[factura_no]
+medio_pago = datos_factura.get('Medio de Pago', '')
+total_factura = float(datos_factura.get('Total', 0))
+emitido_por = datos_factura.get('Emitido por', '')
 
 st.write(f"**Total Neto:** {total_neto:.2f}   **ITBMS:** {total_itbms:.2f}   **Total a Pagar:** {total_neto + total_itbms:.2f}")
 
@@ -198,4 +213,5 @@ if st.button("Enviar Factura a DGI"):
         st.success(f"Respuesta DGI: {response.text}")
     except Exception as e:
         st.error(f"Error al enviar: {str(e)}")
+
 
