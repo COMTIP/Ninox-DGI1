@@ -75,31 +75,15 @@ lineas_factura = st.session_state["lineas_factura"]
 
 clientes_idx = indexar_por_id(clientes)
 
-# ======= DETECTA AUTOMÁTICAMENTE EL CAMPO DE RELACIÓN =======
-relacion_factura = None
-if lineas_factura and "fields" in lineas_factura[0]:
-    for k, v in lineas_factura[0]["fields"].items():
-        # puede ser string (un id) o lista de ids
-        if isinstance(v, str) and v in [f["id"] for f in facturas]:
-            relacion_factura = k
-            break
-        if isinstance(v, list) and v and v[0] in [f["id"] for f in facturas]:
-            relacion_factura = k
-            break
-
-if relacion_factura is None:
-    st.warning("No se detectó el campo de relación entre Línea Factura y Facturas. Verifique sus datos en Ninox.")
-    st.stop()
-
-# ======= SELECCIÓN DE FACTURA =======
+# ======= RELACIONA POR "Factura No." =======
 facturas_con_lineas = [
     f for f in facturas
     if any(
-        (lf["fields"].get(relacion_factura) == f["id"]) or
-        (isinstance(lf["fields"].get(relacion_factura), list) and f["id"] in lf["fields"].get(relacion_factura))
+        str(lf["fields"].get("Factura No.", "")).zfill(8) == str(f["fields"].get("Factura No.", "")).zfill(8)
         for lf in lineas_factura
     )
 ]
+
 if not facturas_con_lineas:
     st.warning("No hay facturas con líneas asociadas en la base de datos.")
     st.stop()
@@ -115,6 +99,7 @@ factura_idx = st.selectbox(
 )
 factura = facturas_con_lineas[factura_idx]
 factura_fields = factura["fields"]
+factura_no_seleccionado = str(factura_fields.get("Factura No.", "")).zfill(8)
 factura_id = factura["id"]
 
 # ======= CLIENTE ASOCIADO =======
@@ -133,14 +118,14 @@ with col2:
     st.text_input("Correo", value=cliente.get('Correo', ''), disabled=True)
 
 # ======= FACTURA NO. EDITABLE =======
-factura_no_usuario = st.text_input("Factura No. (puede editarlo, 8 dígitos)", value=factura_fields.get("Factura No.", ""))
+factura_no_usuario = st.text_input("Factura No. (puede editarlo, 8 dígitos)", value=factura_no_seleccionado)
 if not factura_no_usuario:
     factura_no_usuario = calcular_siguiente_factura_no(facturas)
 
 # ======= FECHA =======
 fecha_emision = st.date_input("Fecha Emisión", value=datetime.today())
 
-# ======= ÍTEMS DESDE LÍNEAS FACTURA =======
+# ======= ÍTEMS DESDE LÍNEAS FACTURA POR "Factura No." =======
 items_factura = [
     {
         "codigo": lf["fields"].get('Código', ''),
@@ -150,8 +135,7 @@ items_factura = [
         "valorITBMS": float(lf["fields"].get('ITBMS', 0))
     }
     for lf in lineas_factura
-    if (lf["fields"].get(relacion_factura) == factura_id) or
-       (isinstance(lf["fields"].get(relacion_factura), list) and factura_id in lf["fields"].get(relacion_factura))
+    if str(lf["fields"].get("Factura No.", "")).zfill(8) == factura_no_usuario.zfill(8)
 ]
 
 if items_factura:
@@ -289,4 +273,3 @@ if st.button("Enviar Factura a DGI"):
             st.session_state["facturas"] = obtener_tabla("Facturas")
         except Exception as e:
             st.error(f"Error: {str(e)}")
-
