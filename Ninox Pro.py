@@ -282,3 +282,4 @@ if st.button("Enviar Factura a DGI"):
             st.session_state["facturas"] = obtener_tabla("Facturas")
         except Exception as e:
             st.error(f"Error: {str(e)}")
+
