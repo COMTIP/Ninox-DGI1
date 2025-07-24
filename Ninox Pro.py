@@ -75,12 +75,35 @@ lineas_factura = st.session_state["lineas_factura"]
 
 clientes_idx = indexar_por_id(clientes)
 
-# ======= SELECCIÓN DE FACTURA =======
-if not clientes or not facturas or not lineas_factura:
-    st.warning("Debe haber clientes, facturas y líneas de factura en la base de datos Ninox.")
+# ======= DETECTA AUTOMÁTICAMENTE EL CAMPO DE RELACIÓN =======
+relacion_factura = None
+if lineas_factura and "fields" in lineas_factura[0]:
+    for k, v in lineas_factura[0]["fields"].items():
+        # puede ser string (un id) o lista de ids
+        if isinstance(v, str) and v in [f["id"] for f in facturas]:
+            relacion_factura = k
+            break
+        if isinstance(v, list) and v and v[0] in [f["id"] for f in facturas]:
+            relacion_factura = k
+            break
+
+if relacion_factura is None:
+    st.warning("No se detectó el campo de relación entre Línea Factura y Facturas. Verifique sus datos en Ninox.")
     st.stop()
 
-facturas_con_lineas = [f for f in facturas if any(lf["fields"].get("Facturas") == f["id"] for lf in lineas_factura)]
+# ======= SELECCIÓN DE FACTURA =======
+facturas_con_lineas = [
+    f for f in facturas
+    if any(
+        (lf["fields"].get(relacion_factura) == f["id"]) or
+        (isinstance(lf["fields"].get(relacion_factura), list) and f["id"] in lf["fields"].get(relacion_factura))
+        for lf in lineas_factura
+    )
+]
+if not facturas_con_lineas:
+    st.warning("No hay facturas con líneas asociadas en la base de datos.")
+    st.stop()
+
 nombres_facturas = [
     f'{f["fields"].get("Factura No.", "")} | {f["fields"].get("Fecha + Hora", "")} | {f["fields"].get("Emitido por", "")}'
     for f in facturas_con_lineas
@@ -94,13 +117,12 @@ factura = facturas_con_lineas[factura_idx]
 factura_fields = factura["fields"]
 factura_id = factura["id"]
 
-# Cliente asociado
+# ======= CLIENTE ASOCIADO =======
 cliente_id = factura_fields.get("Clientes")
 if isinstance(cliente_id, list):
     cliente_id = cliente_id[0] if cliente_id else None
 cliente = clientes_idx.get(cliente_id)["fields"] if cliente_id and clientes_idx.get(cliente_id) else {}
 
-# ======= DATOS DE CLIENTE =======
 col1, col2 = st.columns(2)
 with col1:
     st.text_input("RUC", value=cliente.get('RUC', ''), disabled=True)
@@ -128,10 +150,10 @@ items_factura = [
         "valorITBMS": float(lf["fields"].get('ITBMS', 0))
     }
     for lf in lineas_factura
-    if lf["fields"].get("Facturas") == factura_id
+    if (lf["fields"].get(relacion_factura) == factura_id) or
+       (isinstance(lf["fields"].get(relacion_factura), list) and factura_id in lf["fields"].get(relacion_factura))
 ]
 
-# ======= MOSTRAR ÍTEMS =======
 if items_factura:
     st.write("#### Ítems de la factura")
     for idx, i in enumerate(items_factura):
@@ -156,7 +178,6 @@ if "emisor" not in st.session_state:
     st.session_state["emisor"] = factura_fields.get("Emitido por", "")
 st.session_state["emisor"] = st.text_input("Nombre de quien emite la factura (obligatorio)", value=st.session_state["emisor"])
 
-# ======= ENVIAR A DGI =======
 def obtener_facturas_actualizadas():
     url = f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/Facturas/records"
     headers = {"Authorization": f"Bearer {API_TOKEN}"}
@@ -255,7 +276,6 @@ if st.button("Enviar Factura a DGI"):
         try:
             response = requests.post(url, json=payload)
             st.success(f"Respuesta: {response.text}")
-            # Actualiza historial en sesión (opcional)
             if "historial" not in st.session_state:
                 st.session_state["historial"] = []
             st.session_state["historial"].append({
