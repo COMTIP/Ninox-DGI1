@@ -33,9 +33,17 @@ def calcular_siguiente_factura_no(facturas):
 
 def factura_no_ya_existe(facturas, factura_no):
     for f in facturas:
-        if str(f["fields"].get("Factura No.", "")).zfill(8) == factura_no.zfill(8):
+        if normaliza_fact_no(f["fields"].get("Factura No.", "")) == normaliza_fact_no(factura_no):
             return True
     return False
+
+# ======= NORMALIZADOR DE "Factura No." =======
+def normaliza_fact_no(val):
+    # Convierte a str, elimina espacios, rellena ceros a la izquierda (8 dígitos)
+    val = str(val).strip()
+    if val.isdigit():
+        return val.zfill(8)
+    return val
 
 # ======= LOGIN =======
 USUARIOS = {"Mispanama": "Maxilo2000", "usuario1": "password123"}
@@ -75,11 +83,11 @@ lineas_factura = st.session_state["lineas_factura"]
 
 clientes_idx = indexar_por_id(clientes)
 
-# ======= RELACIONA POR "Factura No." =======
+# ======= RELACIONA POR "Factura No." NORMALIZADO =======
 facturas_con_lineas = [
     f for f in facturas
     if any(
-        str(lf["fields"].get("Factura No.", "")).zfill(8) == str(f["fields"].get("Factura No.", "")).zfill(8)
+        normaliza_fact_no(lf["fields"].get("Factura No.", "")) == normaliza_fact_no(f["fields"].get("Factura No.", ""))
         for lf in lineas_factura
     )
 ]
@@ -99,7 +107,7 @@ factura_idx = st.selectbox(
 )
 factura = facturas_con_lineas[factura_idx]
 factura_fields = factura["fields"]
-factura_no_seleccionado = str(factura_fields.get("Factura No.", "")).zfill(8)
+factura_no_seleccionado = normaliza_fact_no(factura_fields.get("Factura No.", ""))
 factura_id = factura["id"]
 
 # ======= CLIENTE ASOCIADO =======
@@ -121,11 +129,12 @@ with col2:
 factura_no_usuario = st.text_input("Factura No. (puede editarlo, 8 dígitos)", value=factura_no_seleccionado)
 if not factura_no_usuario:
     factura_no_usuario = calcular_siguiente_factura_no(facturas)
+factura_no_usuario = normaliza_fact_no(factura_no_usuario)
 
 # ======= FECHA =======
 fecha_emision = st.date_input("Fecha Emisión", value=datetime.today())
 
-# ======= ÍTEMS DESDE LÍNEAS FACTURA POR "Factura No." =======
+# ======= ÍTEMS DESDE LÍNEAS FACTURA POR "Factura No." NORMALIZADO =======
 items_factura = [
     {
         "codigo": lf["fields"].get('Código', ''),
@@ -135,7 +144,7 @@ items_factura = [
         "valorITBMS": float(lf["fields"].get('ITBMS', 0))
     }
     for lf in lineas_factura
-    if str(lf["fields"].get("Factura No.", "")).zfill(8) == factura_no_usuario.zfill(8)
+    if normaliza_fact_no(lf["fields"].get("Factura No.", "")) == factura_no_usuario
 ]
 
 if items_factura:
