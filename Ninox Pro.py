@@ -1,7 +1,6 @@
 import streamlit as st
 import requests
 from datetime import datetime
-import pandas as pd
 
 # ======= CONFIGURACIÓN NINOX =======
 API_TOKEN = "d3c82d50-60d4-11f0-9dd2-0154422825e5"
@@ -31,19 +30,15 @@ def calcular_siguiente_factura_no(facturas):
             continue
     return f"{max_factura + 1:08d}"
 
+def normaliza_fact_no(val):
+    val = str(val).strip()
+    return val.zfill(8) if val.isdigit() else val
+
 def factura_no_ya_existe(facturas, factura_no):
     for f in facturas:
         if normaliza_fact_no(f["fields"].get("Factura No.", "")) == normaliza_fact_no(factura_no):
             return True
     return False
-
-# ======= NORMALIZADOR DE "Factura No." =======
-def normaliza_fact_no(val):
-    # Convierte a str, elimina espacios, rellena ceros a la izquierda (8 dígitos)
-    val = str(val).strip()
-    if val.isdigit():
-        return val.zfill(8)
-    return val
 
 # ======= LOGIN =======
 USUARIOS = {"Mispanama": "Maxilo2000", "usuario1": "password123"}
@@ -83,11 +78,18 @@ lineas_factura = st.session_state["lineas_factura"]
 
 clientes_idx = indexar_por_id(clientes)
 
-# ======= RELACIONA POR "Factura No." NORMALIZADO =======
+# ======= DEBUG: Imprime números de factura de ambas tablas =======
+fact_nos_facturas = [normaliza_fact_no(f["fields"].get("Factura No.", "")) for f in facturas]
+fact_nos_lineas = [normaliza_fact_no(lf["fields"].get("Factura No.", "")) for lf in lineas_factura]
+st.write("Factura No. en Facturas:", fact_nos_facturas)
+st.write("Factura No. en Lineas Factura:", fact_nos_lineas)
+
+# ======= FILTRO ROBUSTO =======
 facturas_con_lineas = [
     f for f in facturas
     if any(
         normaliza_fact_no(lf["fields"].get("Factura No.", "")) == normaliza_fact_no(f["fields"].get("Factura No.", ""))
+        and normaliza_fact_no(f["fields"].get("Factura No.", "")) != ""
         for lf in lineas_factura
     )
 ]
