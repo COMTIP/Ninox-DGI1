@@ -2,32 +2,35 @@ import streamlit as st
 import requests
 from datetime import datetime
 
-# ========== CONFIGURACIÓN ==========
+# ================= CONFIGURA TUS CREDENCIALES DE NINOX =================
 API_TOKEN = "TU_API_TOKEN"
 TEAM_ID = "TU_TEAM_ID"
 DATABASE_ID = "TU_DATABASE_ID"
 
-# ========== FUNCIONES ==========
+# ================= FUNCIONES =================
 def obtener_tabla(tabla):
     url = f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/{tabla}/records"
     headers = {"Authorization": f"Bearer {API_TOKEN}"}
     r = requests.get(url, headers=headers)
-    return r.json() if r.ok else []
+    if not r.ok:
+        st.error(f"Error al cargar '{tabla}': {r.status_code} - {r.text}")
+        return []
+    return r.json()
 
 def indexar_por_id(lista):
-    return {x['id']: x for x in lista}
+    return {x["id"]: x for x in lista}
 
 def normaliza_fact_no(val):
     val = str(val).strip()
     return val.zfill(8) if val.isdigit() else val
 
-# ========== LOGIN ==========
+# ================= AUTENTICACIÓN =================
 USUARIOS = {"admin": "1234", "Mispanama": "Maxilo2000"}
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
 
 if not st.session_state["autenticado"]:
-    st.title("Acceso al Sistema de Facturación")
+    st.title("Facturación Electrónica")
     usuario = st.text_input("Usuario")
     password = st.text_input("Contraseña", type="password")
     if st.button("Ingresar"):
@@ -42,21 +45,18 @@ if st.sidebar.button("Cerrar sesión"):
     st.session_state["autenticado"] = False
     st.rerun()
 
-# ========== ACTUALIZAR DATOS ==========
+# ================= CARGA DE DATOS =================
 if st.button("Actualizar datos de Ninox"):
-    for k in ["clientes", "facturas", "lineas_factura"]:
-        st.session_state.pop(k, None)
+    for key in ["clientes", "facturas", "lineas_factura"]:
+        st.session_state.pop(key, None)
 
 clientes = st.session_state.setdefault("clientes", obtener_tabla("Clientes"))
 facturas = st.session_state.setdefault("facturas", obtener_tabla("Facturas"))
 lineas_factura = st.session_state.setdefault("lineas_factura", obtener_tabla("Líneas Factura"))
+
 clientes_idx = indexar_por_id(clientes)
 
-# ========== DEBUG: MOSTRAR VALORES ==========
-st.write("Facturas cargadas:", [f["fields"].get("Factura No.", "") for f in facturas])
-st.write("Líneas cargadas:", [lf["fields"].get("Factura No.", "") for lf in lineas_factura])
-
-# ========== FILTRAR FACTURAS CON LÍNEAS ==========
+# ================= FILTRAR FACTURAS CON LÍNEAS =================
 fact_no_lineas = {normaliza_fact_no(lf["fields"].get("Factura No.", "")) for lf in lineas_factura}
 facturas_con_lineas = [
     f for f in facturas
@@ -67,21 +67,21 @@ if not facturas_con_lineas:
     st.warning("No hay facturas con líneas asociadas.")
     st.stop()
 
-# ========== SELECCIÓN DE FACTURA ==========
-opciones = [
+# ================= SELECCIÓN DE FACTURA =================
+nombres_facturas = [
     f'{f["fields"].get("Factura No.", "")} | {f["fields"].get("Fecha + Hora", "")} | {f["fields"].get("Emitido por", "")}'
     for f in facturas_con_lineas
 ]
-seleccion = st.selectbox("Seleccione una factura", opciones)
-factura = facturas_con_lineas[opciones.index(seleccion)]
+seleccion = st.selectbox("Seleccione una factura", nombres_facturas)
+factura = facturas_con_lineas[nombres_facturas.index(seleccion)]
 factura_no = normaliza_fact_no(factura["fields"].get("Factura No.", ""))
 cliente_id = factura["fields"].get("Clientes")
 if isinstance(cliente_id, list):
-    cliente_id = cliente_id[0]
+    cliente_id = cliente_id[0] if cliente_id else None
 cliente = clientes_idx.get(cliente_id, {}).get("fields", {})
 
-# ========== CLIENTE ==========
-st.subheader("🧾 Cliente")
+# ================= MOSTRAR CLIENTE =================
+st.subheader("Cliente")
 col1, col2 = st.columns(2)
 with col1:
     st.text_input("Nombre", value=cliente.get("Nombre", ""), disabled=True)
@@ -92,7 +92,7 @@ with col2:
     st.text_input("Correo", value=cliente.get("Correo", ""), disabled=True)
 st.text_area("Dirección", value=cliente.get("Dirección", ""), disabled=True)
 
-# ========== ÍTEMS ==========
+# ================= MOSTRAR ÍTEMS =================
 items_factura = [
     {
         "codigo": lf["fields"].get("Código", ""),
@@ -105,7 +105,7 @@ items_factura = [
     if normaliza_fact_no(lf["fields"].get("Factura No.", "")) == factura_no
 ]
 
-st.subheader("📋 Ítems")
+st.subheader("Ítems")
 if items_factura:
     st.write(items_factura)
     total_neto = sum(i["cantidad"] * i["precioUnitario"] for i in items_factura)
@@ -116,7 +116,7 @@ else:
     st.warning("No hay ítems.")
     st.stop()
 
-# ========== FORMULARIO DE ENVÍO ==========
+# ================= DATOS ADICIONALES =================
 medio_pago = st.selectbox("Medio de pago", ["Efectivo", "Débito", "Crédito"])
 fecha_emision = st.date_input("Fecha de emisión", value=datetime.today())
 
@@ -124,7 +124,7 @@ if "emisor" not in st.session_state:
     st.session_state["emisor"] = factura["fields"].get("Emitido por", "")
 st.session_state["emisor"] = st.text_input("Emitido por", value=st.session_state["emisor"])
 
-# ========== ENVÍO ==========
+# ================= ENVIAR A DGI =================
 if st.button("Enviar factura a DGI"):
     if not st.session_state["emisor"].strip():
         st.error("Debe ingresar el nombre del emisor.")
@@ -202,13 +202,13 @@ if st.button("Enviar factura a DGI"):
         }
     }
 
-    st.write("Payload enviado:")
+    st.write("📤 Enviando JSON:")
     st.json(payload)
 
     try:
-        url = "https://ninox-factory-server.onrender.com/enviar-factura"
-        response = requests.post(url, json=payload)
-        st.success(f"Factura enviada correctamente. Respuesta: {response.text}")
+        response = requests.post("https://ninox-factory-server.onrender.com/enviar-factura", json=payload)
+        st.success(f"Factura enviada. Respuesta: {response.text}")
     except Exception as e:
-        st.error(f"Error al enviar: {e}")
+        st.error(f"Error: {e}")
+
 
