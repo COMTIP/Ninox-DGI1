@@ -36,8 +36,8 @@ DATABASE_ID = "yoq1qy9euurq"
 
 # IDs de tablas Ninox (UUID)
 TABLA_CLIENTES = "d3c82d50-60d4-11f0-9dd2-0154422825e5"  # Clientes
-TABLA_PRODUCTOS = "REEMPLAZA_CON_ID_PRODUCTOS"
-TABLA_FACTURAS = "REEMPLAZA_CON_ID_FACTURAS"
+TABLA_PRODUCTOS = "d3c82d50-60d4-11f0-9dd2-0154422825e5"
+TABLA_FACTURAS = "d3c82d50-60d4-11f0-9dd2-0154422825e5"
 
 def obtener_registros(tabla_id):
     url = f"https://api.ninoxdb.de/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/{tabla_id}/records"
