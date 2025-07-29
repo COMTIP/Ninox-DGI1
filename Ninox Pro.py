@@ -1,6 +1,6 @@
 import streamlit as st
 import requests
-import pandas as pd
+import datetime
 
 # ===== CONFIGURACIÓN =====
 API_TOKEN = "d3c82d50-60d4-11f0-9dd2-0154422825e5"
@@ -23,28 +23,44 @@ def get_ninox_table(table_name):
         return []
 
 # ===== INTERFAZ STREAMLIT =====
-st.title("Clientes de Ninox")
+st.title("Factura Electrónica")
 
-clientes = get_ninox_table("Clientes")
+if st.button("Actualizar datos de Ninox"):
+    st.session_state["clientes"] = get_ninox_table("Clientes")
+
+# Cargar clientes en la sesión si no existe
+if "clientes" not in st.session_state:
+    st.session_state["clientes"] = get_ninox_table("Clientes")
+
+clientes = st.session_state["clientes"]
 
 if clientes:
-    # Convertir a DataFrame
-    data = []
-    for c in clientes:
-        fields = c.get("fields", {})
-        data.append({
-            "Nombre": fields.get("Nombre", ""),
-            "RUC": fields.get("RUC", ""),
-            "DV": fields.get("DV", ""),
-            "Dirección": fields.get("Dirección", ""),
-            "Teléfono": fields.get("Teléfono", ""),
-            "Correo": fields.get("Correo", "")
-        })
+    # Lista de nombres para el selectbox
+    nombres_clientes = [c.get("fields", {}).get("Nombre", "Sin Nombre") for c in clientes]
+    cliente_seleccionado = st.selectbox("Seleccione Cliente", nombres_clientes)
 
-    df = pd.DataFrame(data)
-    st.dataframe(df)
+    # Buscar los datos del cliente seleccionado
+    cliente_data = next(
+        (c for c in clientes if c.get("fields", {}).get("Nombre") == cliente_seleccionado), None
+    )
+
+    if cliente_data:
+        fields = cliente_data.get("fields", {})
+
+        # Campos de la factura
+        col1, col2 = st.columns(2)
+        with col1:
+            st.text_input("RUC", fields.get("RUC", ""), disabled=True)
+            st.text_input("DV", fields.get("DV", ""), disabled=True)
+            st.text_area("Dirección", fields.get("Dirección", ""), disabled=True)
+        with col2:
+            st.text_input("Teléfono", fields.get("Teléfono", ""), disabled=True)
+            st.text_input("Correo", fields.get("Correo", ""), disabled=True)
+
+        st.text_input("Factura No.", "00000072", disabled=True)
+        st.text_input("Fecha Emisión", datetime.date.today().strftime("%Y/%m/%d"), disabled=True)
 else:
-    st.warning("No se encontraron clientes.")
+    st.warning("No se encontraron clientes en Ninox.")
 
 
 
