@@ -2,76 +2,60 @@ import streamlit as st
 import pandas as pd
 import requests
 
-# --- Configuración API Ninox ---
-NINOX_TEAM = "6dA5DFvfDTxCQxpDF"
-NINOX_DATABASE = "yoq1qy9euurq"
-NINOX_API_KEY = "d3c82d50-60d4-11f0-9dd2-0154422825e5"
+# ========================
+# CONFIGURACIÓN NINOX
+# ========================
+NINOX_API_KEY = "TU_API_KEY"  # Coloca tu API Key
+NINOX_TEAM = "6dA5DFvfDTxCQxpDF"  # Team ID
+NINOX_DATABASE = "yoq1qy9euurq"  # Database ID
 
-# ID de tablas (según Ninox)
-TABLE_CLIENTES = "B"
-TABLE_FACTURAS = "E"
+TABLE_CLIENTES = "Clientes"   # Nombre exacto en Ninox
+TABLE_FACTURAS = "Facturas"   # Nombre exacto en Ninox
 
-# --- Función para obtener datos de Ninox ---
-def get_ninox_data(table_id):
-    url = f"https://api.ninoxdb.de/v1/teams/{NINOX_TEAM}/databases/{NINOX_DATABASE}/tables/{table_id}/records"
+# ========================
+# FUNCIÓN PARA CARGAR DATOS
+# ========================
+def get_ninox_data(table_name):
+    url = f"https://api.ninoxdb.de/v1/teams/{NINOX_TEAM}/databases/{NINOX_DATABASE}/tables/{table_name}/records"
     headers = {"Authorization": f"Bearer {NINOX_API_KEY}"}
     response = requests.get(url, headers=headers)
 
     if response.status_code == 200:
         records = response.json()
-        data = []
-        for rec in records:
-            row = {field["name"]: field.get("value", "") for field in rec["fields"]}
-            data.append(row)
+        data = [rec.get("fields", {}) for rec in records]  # fields es dict
         return pd.DataFrame(data)
     else:
-        st.error(f"Error {response.status_code} al conectar con Ninox")
+        st.error(f"Error {response.status_code} al conectar con Ninox para la tabla {table_name}")
         return pd.DataFrame()
 
-# --- Título ---
+# ========================
+# APP STREAMLIT
+# ========================
+st.set_page_config(page_title="Gestión de Facturación DGI", layout="wide")
 st.title("Gestión de Facturación DGI")
 
-# --- Cargar datos ---
+# ------------------------
+# CARGAR CLIENTES
+# ------------------------
+st.subheader("Clientes")
 clientes_df = get_ninox_data(TABLE_CLIENTES)
+st.dataframe(clientes_df)
+
+# ------------------------
+# CARGAR FACTURAS
+# ------------------------
+st.subheader("Facturas (solo Procesadas)")
 facturas_df = get_ninox_data(TABLE_FACTURAS)
 
-# --- Selección de Cliente ---
-if not clientes_df.empty:
-    cliente_nombre = st.selectbox("Seleccione Cliente", clientes_df["Nombre"])
-    cliente = clientes_df[clientes_df["Nombre"] == cliente_nombre].iloc[0]
-
-    st.text_input("RUC", cliente.get("RUC", ""), disabled=True)
-    st.text_input("Teléfono", cliente.get("Teléfono", ""), disabled=True)
-    st.text_input("Correo", cliente.get("Correo", ""), disabled=True)
-else:
-    st.warning("No hay clientes en Ninox.")
-
-# --- Mostrar Facturas Procesadas ---
-st.subheader("Facturas Procesadas (Excluyendo 'Listo')")
-
 if not facturas_df.empty:
-    # Filtrar solo las facturas procesadas
-    df_procesadas = facturas_df[
-        (facturas_df["Estado"] == "Procesado")
-    ]
-
-    # Filtrar por cliente seleccionado
-    if "Cliente" in df_procesadas.columns:
-        df_procesadas = df_procesadas[df_procesadas["Cliente"] == cliente_nombre]
-
-    st.dataframe(df_procesadas, use_container_width=True)
-
-    # Botón para exportar a Excel
-    if not df_procesadas.empty:
-        excel_file = df_procesadas.to_excel(index=False)
-        st.download_button(
-            label="📥 Exportar a Excel para DGI",
-            data=excel_file,
-            file_name=f"Facturas_Procesadas_{cliente_nombre}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+    # Filtrar solo Estado = Procesado
+    if "Estado" in facturas_df.columns:
+        facturas_procesadas = facturas_df[facturas_df["Estado"] == "Procesado"]
+        st.dataframe(facturas_procesadas)
+    else:
+        st.warning("No se encontró la columna 'Estado' en Facturas.")
 else:
-    st.info("No hay facturas en Ninox.")
+    st.warning("No se cargaron facturas desde Ninox.")
 
 
 
