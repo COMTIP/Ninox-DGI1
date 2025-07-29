@@ -5,7 +5,7 @@ import requests
 # --- Configuración de tu API Ninox ---
 NINOX_TEAM = "6dA5DFvfDTxCQxpDF"
 NINOX_DATABASE = "yoq1qy9euurq"
-NINOX_API_KEY = "TU_API_KEY"  # Coloca tu API Key aquí
+NINOX_API_KEY = "d3c82d50-60d4-11f0-9dd2-0154422825e5"  
 NINOX_TABLE_FACTURAS = "Facturas"  # Nombre exacto de la tabla
 
 # --- Función para obtener datos de Ninox ---
