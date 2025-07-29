@@ -29,25 +29,34 @@ if st.sidebar.button("Cerrar sesión"):
     st.session_state["autenticado"] = False
     st.rerun()
 
-# ======= CONFIGURACIÓN NINOX ==========
-API_TOKEN = "TU_API_TOKEN_REAL"  # <---- Reemplaza con tu API Token
+# ======= NINOX API CONFIG ==========
+API_TOKEN = "d3c82d50-60d4-11f0-9dd2-0154422825e5"
 TEAM_ID = "6dA5DFvfDTxCQxpDF"
 DATABASE_ID = "yoq1qy9euurq"
 
-# IDs de tablas Ninox (UUID)
-TABLA_CLIENTES = "d3c82d50-60d4-11f0-9dd2-0154422825e5"  # Clientes
-TABLA_PRODUCTOS = "d3c82d50-60d4-11f0-9dd2-0154422825e5"
-TABLA_FACTURAS = "d3c82d50-60d4-11f0-9dd2-0154422825e5"
-
-def obtener_registros(tabla_id):
-    url = f"https://api.ninoxdb.de/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/{tabla_id}/records"
+def obtener_clientes():
+    url = f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/Clientes/records"
     headers = {"Authorization": f"Bearer {API_TOKEN}"}
     r = requests.get(url, headers=headers)
     if r.ok:
         return r.json()
-    else:
-        st.error(f"Error {r.status_code}: {r.text}")
-        return []
+    return []
+
+def obtener_productos():
+    url = f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/Productos/records"
+    headers = {"Authorization": f"Bearer {API_TOKEN}"}
+    r = requests.get(url, headers=headers)
+    if r.ok:
+        return r.json()
+    return []
+
+def obtener_facturas():
+    url = f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/Facturas/records"
+    headers = {"Authorization": f"Bearer {API_TOKEN}"}
+    r = requests.get(url, headers=headers)
+    if r.ok:
+        return r.json()
+    return []
 
 def calcular_siguiente_factura_no(facturas):
     max_factura = 0
@@ -71,20 +80,20 @@ menu = st.sidebar.radio(
 # ================== FACTURACIÓN ======================
 if menu == "Facturación":
 
-    st.title("Factura Electrónica DGI")
+    st.set_page_config(page_title="Factura Electrónica Ninox + DGI", layout="centered")
+    st.title("Factura Electrónica")
 
     if st.button("Actualizar datos de Ninox"):
         st.session_state.pop("clientes", None)
         st.session_state.pop("productos", None)
         st.session_state.pop("facturas", None)
 
-    # Cachear datos en sesión
     if "clientes" not in st.session_state:
-        st.session_state["clientes"] = obtener_registros(TABLA_CLIENTES)
+        st.session_state["clientes"] = obtener_clientes()
     if "productos" not in st.session_state:
-        st.session_state["productos"] = obtener_registros(TABLA_PRODUCTOS)
+        st.session_state["productos"] = obtener_productos()
     if "facturas" not in st.session_state:
-        st.session_state["facturas"] = obtener_registros(TABLA_FACTURAS)
+        st.session_state["facturas"] = obtener_facturas()
 
     clientes = st.session_state["clientes"]
     productos = st.session_state["productos"]
@@ -111,7 +120,7 @@ if menu == "Facturación":
         st.text_input("Teléfono", value=cliente.get('Teléfono', ''), disabled=True)
         st.text_input("Correo", value=cliente.get('Correo', ''), disabled=True)
 
-    # --- Factura No y Fecha ---
+    # --- Factura No y Fecha (no editable, siempre actualizado antes de enviar) ---
     factura_no_preview = calcular_siguiente_factura_no(facturas)
     st.text_input("Factura No.", value=factura_no_preview, disabled=True)
     fecha_emision = st.date_input("Fecha Emisión", value=datetime.today())
@@ -150,24 +159,33 @@ if menu == "Facturación":
 
     medio_pago = st.selectbox("Medio de Pago", ["Efectivo", "Débito", "Crédito"])
 
-    # ----------- EMISOR OBLIGATORIO ----------
+    # ----------- EMISOR OBLIGATORIO SOLO PARA HISTORIAL ----------
     if "emisor" not in st.session_state:
         st.session_state["emisor"] = ""
     st.session_state["emisor"] = st.text_input("Nombre de quien emite la factura (obligatorio)", value=st.session_state["emisor"])
 
     # --- Enviar a DGI ---
+    def obtener_facturas_actualizadas():
+        url = f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/Facturas/records"
+        headers = {"Authorization": f"Bearer {API_TOKEN}"}
+        r = requests.get(url, headers=headers)
+        if r.ok:
+            return r.json()
+        return []
+
     if st.button("Enviar Factura a DGI"):
         if not st.session_state["emisor"].strip():
             st.error("Debe ingresar el nombre de quien emite la factura antes de enviarla.")
         elif not st.session_state['items']:
             st.error("Debe agregar al menos un producto.")
         else:
-            factura_no_final = calcular_siguiente_factura_no(obtener_registros(TABLA_FACTURAS))
+            # Refresca el correlativo real antes de enviar
+            facturas_actualizadas = obtener_facturas_actualizadas()
+            factura_no_final = calcular_siguiente_factura_no(facturas_actualizadas)
             forma_pago = {
                 "formaPagoFact": {"Efectivo": "01", "Débito": "02", "Crédito": "03"}[medio_pago],
                 "valorCuotaPagada": f"{total_factura:.2f}"
             }
-
             payload = {
                 "documento": {
                     "codigoSucursalEmisor": "0000",
@@ -222,23 +240,27 @@ if menu == "Facturación":
                         "totalITBMS": f"{total_itbms:.2f}",
                         "totalMontoGravado": f"{total_itbms:.2f}",
                         "totalDescuento": "0.00",
+                        "totalAcarreoCobrado": "0.00",
+                        "valorSeguroCobrado": "0.00",
                         "totalFactura": f"{total_factura:.2f}",
                         "totalValorRecibido": f"{total_factura:.2f}",
                         "vuelto": "0.00",
                         "tiempoPago": "1",
                         "nroItems": str(len(st.session_state['items'])),
                         "totalTodosItems": f"{total_factura:.2f}",
-                        "listaFormaPago": {"formaPago": [forma_pago]}
+                        "listaFormaPago": {
+                            "formaPago": [forma_pago]
+                        }
                     }
                 }
             }
-
+            st.write("JSON enviado:")
             st.json(payload)
             url = "https://ninox-factory-server.onrender.com/enviar-factura"
             try:
                 response = requests.post(url, json=payload)
-                st.success(f"Respuesta DGI: {response.text}")
-                # Guarda en historial local
+                st.success(f"Respuesta: {response.text}")
+                # Guarda en historial local para tu control
                 if "historial" not in st.session_state:
                     st.session_state["historial"] = []
                 st.session_state["historial"].append({
@@ -249,12 +271,16 @@ if menu == "Facturación":
                     "Medio de Pago": medio_pago,
                     "Emitido por": st.session_state["emisor"]
                 })
+                # Refresca facturas
+                st.session_state["facturas"] = obtener_facturas_actualizadas()
             except Exception as e:
                 st.error(f"Error: {str(e)}")
 
 # ================== HISTORIAL =======================
 elif menu == "Ver historial":
     st.title("Historial de facturas enviadas")
+
+    # Cargar historial local de la sesión
     historial = st.session_state.get("historial", [])
 
     if not historial:
@@ -263,6 +289,7 @@ elif menu == "Ver historial":
         df = pd.DataFrame(historial)
         st.dataframe(df, use_container_width=True)
 
+        # Descargar como Excel
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False)
@@ -272,3 +299,5 @@ elif menu == "Ver historial":
             file_name='historial_facturas.xlsx',
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
+
+
