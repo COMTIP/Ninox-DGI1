@@ -1,66 +1,91 @@
 import streamlit as st
+import pandas as pd
 import requests
-import datetime
 
-# ===== CONFIGURACIÓN =====
-API_TOKEN = "d3c82d50-60d4-11f0-9dd2-0154422825e5"
+# -----------------------------
+# CONFIGURACIÓN DE INTERFAZ
+# -----------------------------
+st.set_page_config(page_title="Factura Electrónica", layout="centered")
+st.title("Factura Electrónica")
+
+# -----------------------------
+# FUNCIÓN PARA CARGAR DATOS DESDE NINOX
+# -----------------------------
+# Si tienes la API Key de Ninox:
+# Reemplaza estos valores:
+API_KEY = "TU_API_KEY"
 TEAM_ID = "6dA5DFvfDTxCQxpDF"
 DATABASE_ID = "yoq1qy9euurq"
 
-HEADERS = {
-    "Authorization": f"Bearer {API_TOKEN}",
-    "Content-Type": "application/json"
-}
+def cargar_facturas():
+    url = f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/Facturas/records"
+    headers = {
+        "Authorization": f"Bearer {API_KEY}"
+    }
+    response = requests.get(url, headers=headers)
 
-# ===== FUNCIONES =====
-def get_ninox_table(table_name):
-    url = f"https://api.ninoxdb.de/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/{table_name}/records"
-    response = requests.get(url, headers=HEADERS)
     if response.status_code == 200:
-        return response.json()
+        data = response.json()
+        # Convertir a DataFrame
+        rows = []
+        for record in data:
+            fields = record["fields"]
+            rows.append({
+                "Factura No.": fields.get("Factura No."),
+                "Fecha + Hora": fields.get("Fecha + Hora"),
+                "Medio de Pago": fields.get("Medio de Pago"),
+                "Total": fields.get("Total"),
+                "Emitido por": fields.get("Emitido por"),
+                "Estado": fields.get("Estado"),
+            })
+        df = pd.DataFrame(rows)
+        return df
     else:
-        st.error(f"Error al cargar '{table_name}': {response.status_code} - {response.reason}")
-        return []
+        st.error("Error al obtener datos de Ninox")
+        return pd.DataFrame()
 
-# ===== INTERFAZ STREAMLIT =====
-st.title("Factura Electrónica")
+# -----------------------------
+# CARGAR DATOS
+# -----------------------------
+df_facturas = cargar_facturas()
 
-if st.button("Actualizar datos de Ninox"):
-    st.session_state["clientes"] = get_ninox_table("Clientes")
+# Filtrar solo las facturas procesadas
+df_procesadas = df_facturas[df_facturas["Estado"] == "Procesado"]
 
-# Cargar clientes en la sesión si no existe
-if "clientes" not in st.session_state:
-    st.session_state["clientes"] = get_ninox_table("Clientes")
-
-clientes = st.session_state["clientes"]
-
-if clientes:
-    # Lista de nombres para el selectbox
-    nombres_clientes = [c.get("fields", {}).get("Nombre", "Sin Nombre") for c in clientes]
-    cliente_seleccionado = st.selectbox("Seleccione Cliente", nombres_clientes)
-
-    # Buscar los datos del cliente seleccionado
-    cliente_data = next(
-        (c for c in clientes if c.get("fields", {}).get("Nombre") == cliente_seleccionado), None
-    )
-
-    if cliente_data:
-        fields = cliente_data.get("fields", {})
-
-        # Campos de la factura
-        col1, col2 = st.columns(2)
-        with col1:
-            st.text_input("RUC", fields.get("RUC", ""), disabled=True)
-            st.text_input("DV", fields.get("DV", ""), disabled=True)
-            st.text_area("Dirección", fields.get("Dirección", ""), disabled=True)
-        with col2:
-            st.text_input("Teléfono", fields.get("Teléfono", ""), disabled=True)
-            st.text_input("Correo", fields.get("Correo", ""), disabled=True)
-
-        st.text_input("Factura No.", "00000072", disabled=True)
-        st.text_input("Fecha Emisión", datetime.date.today().strftime("%Y/%m/%d"), disabled=True)
+if df_procesadas.empty:
+    st.warning("No hay facturas procesadas.")
 else:
-    st.warning("No se encontraron clientes en Ninox.")
+    # -----------------------------
+    # SELECCIÓN DE CLIENTE
+    # -----------------------------
+    clientes = df_procesadas["Emitido por"].unique()
+    cliente_sel = st.selectbox("Seleccione Cliente", clientes)
+
+    # Filtrar facturas por cliente
+    facturas_cliente = df_procesadas[df_procesadas["Emitido por"] == cliente_sel]
+
+    # -----------------------------
+    # MOSTRAR INFORMACIÓN DE FACTURA
+    # -----------------------------
+    factura = facturas_cliente.iloc[-1]  # Última factura procesada de ese cliente
+
+    # Simular datos de cliente (esto podría venir de otra tabla "Clientes")
+    ruc = "8-876-2342"
+    telefono = "6863-3763"
+    dv = "11"
+    correo = "biomedical@iompanama.com"
+    direccion = "Panamá"
+
+    st.text_input("RUC", ruc, disabled=True)
+    st.text_input("Teléfono", telefono, disabled=True)
+    st.text_input("DV", dv, disabled=True)
+    st.text_input("Correo", correo, disabled=True)
+    st.text_area("Dirección", direccion, disabled=True)
+    st.text_input("Factura No.", factura["Factura No."], disabled=True)
+    st.text_input("Fecha Emisión", factura["Fecha + Hora"], disabled=True)
+    st.text_input("Medio de Pago", factura["Medio de Pago"], disabled=True)
+    st.text_input("Total", f"${factura['Total']}", disabled=True)
+
 
 
 
