@@ -3,9 +3,9 @@ import requests
 from datetime import datetime
 
 # ========== CONFIGURA TU ACCESO A NINOX ==========
-API_TOKEN = "TU_NUEVO_API_TOKEN"
-TEAM_ID = "TU_TEAM_ID"
-DATABASE_ID = "TU_DATABASE_ID"
+API_TOKEN = "d3c82d50-60d4-11f0-9dd2-0154422825e5"
+TEAM_ID = "6dA5DFvfDTxCQxpDF"
+DATABASE_ID = "yoq1qy9euurq"
 
 # ========== FUNCIONES AUXILIARES ==========
 def obtener_tabla(tabla):
