@@ -276,28 +276,3 @@ if menu == "Facturación":
             except Exception as e:
                 st.error(f"Error: {str(e)}")
 
-# ================== HISTORIAL =======================
-elif menu == "Ver historial":
-    st.title("Historial de facturas enviadas")
-
-    # Cargar historial local de la sesión
-    historial = st.session_state.get("historial", [])
-
-    if not historial:
-        st.info("No hay facturas enviadas en esta sesión.")
-    else:
-        df = pd.DataFrame(historial)
-        st.dataframe(df, use_container_width=True)
-
-        # Descargar como Excel
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False)
-        st.download_button(
-            label="Descargar historial en Excel",
-            data=output.getvalue(),
-            file_name='historial_facturas.xlsx',
-            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        )
-
-
