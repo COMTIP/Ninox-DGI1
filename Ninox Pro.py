@@ -157,18 +157,20 @@ if tipo_documento == "Factura":
             }
         }
     }
-     st.write("JSON enviado:")
+    st.write("JSON enviado:")
     st.json(payload)
 
-    url = "https://ninox-factory-server.onrender.com/enviar-factura"
     if st.button("Enviar Factura a DGI"):
-        response = requests.post(FACTORY_URL, json=payload)
-        if response.ok:
-            st.success("Factura enviada correctamente ✅")
-            st.json(response.json())
-        else:
-            st.error("Error al enviar")
-            st.text(response.text)
+        url = "https://ninox-factory-server.onrender.com/enviar-factura"
+        try:
+            response = requests.post(url, json=payload)
+            if response.ok:
+                st.success("Factura enviada correctamente ✅")
+                st.json(response.json())
+            else:
+                st.error("Error al enviar: " + response.text)
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
 
 # ========== NOTA DE CRÉDITO ==========
 elif tipo_documento == "Nota de Crédito":
@@ -277,13 +279,16 @@ elif tipo_documento == "Nota de Crédito":
     }
     st.write("JSON enviado:")
     st.json(payload)
-    
-    url = "https://ninox-factory-server.onrender.com/enviar-factura"
+
     if st.button("Enviar Nota de Crédito a DGI"):
-        response = requests.post(FACTORY_URL, json=payload)
-        if response.ok:
-            st.success("Nota de crédito enviada correctamente ✅")
-            st.json(response.json())
-        else:
-            st.error("Error al enviar")
-            st.text(response.text)
+        url = "https://ninox-factory-server.onrender.com/enviar-factura"
+        try:
+            response = requests.post(url, json=payload)
+            if response.ok:
+                st.success("Nota de crédito enviada correctamente ✅")
+                st.json(response.json())
+            else:
+                st.error("Error al enviar: " + response.text)
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
+
