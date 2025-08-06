@@ -2,11 +2,12 @@ import streamlit as st
 import requests
 from datetime import datetime
 
-# ========= LOGIN ===========
+# ====== LOGIN OBLIGATORIO =======
 USUARIOS = {
     "Mispanama": "Maxilo2000",
     "usuario1": "password123"
 }
+
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
 
@@ -21,11 +22,12 @@ if not st.session_state["autenticado"]:
         else:
             st.error("Usuario o contraseña incorrectos.")
     st.stop()
+
 if st.sidebar.button("Cerrar sesión"):
     st.session_state["autenticado"] = False
     st.rerun()
 
-# ========== NINOX API ==========
+# ========== NINOX API ===========
 API_TOKEN = "d3c82d50-60d4-11f0-9dd2-0154422825e5"
 TEAM_ID = "6dA5DFvfDTxCQxpDF"
 DATABASE_ID = "yoq1qy9euurq"
@@ -48,12 +50,10 @@ def obtener_lineas_factura():
     r = requests.get(url, headers=headers)
     return r.json() if r.ok else []
 
-# ==================== MENÚ ====================
-st.sidebar.title("Menú")
+# ==================== UI ====================
 st.set_page_config(page_title="Factura Electrónica Ninox + DGI", layout="centered")
 st.title("Factura Electrónica")
 
-# Actualizar datos
 if st.button("Actualizar datos de Ninox"):
     st.session_state.pop("clientes", None)
     st.session_state.pop("facturas", None)
@@ -70,11 +70,12 @@ clientes = st.session_state["clientes"]
 facturas = st.session_state["facturas"]
 lineas_factura = st.session_state["lineas_factura"]
 
-# ========= SELECCIONA CLIENTE =========
 if not clientes:
     st.warning("No hay clientes en Ninox")
     st.stop()
-nombres_clientes = [c['fields'].get('Nombre','') for c in clientes]
+
+# ---------------- SELECCION DE CLIENTE ----------------
+nombres_clientes = [c['fields']['Nombre'] for c in clientes]
 cliente_idx = st.selectbox("Seleccione Cliente", range(len(nombres_clientes)), format_func=lambda x: nombres_clientes[x])
 cliente = clientes[cliente_idx]["fields"]
 
@@ -87,57 +88,69 @@ with col2:
     st.text_input("Teléfono", value=cliente.get('Teléfono', ''), disabled=True)
     st.text_input("Correo", value=cliente.get('Correo', ''), disabled=True)
 
-# ========= SELECCIONA FACTURA PENDIENTE =========
-facturas_cliente = [f for f in facturas if f["fields"].get("Estado", "") == "Pendiente" and f["fields"].get("Emitido por", "") == cliente.get("Nombre", "")]
-if not facturas_cliente:
-    st.warning("Este cliente no tiene facturas pendientes.")
+# ------------- FILTRAR FACTURAS PENDIENTES DEL CLIENTE -----------------
+# (Relacionando por "Nombre" en Cliente y en Factura, o cambia aquí si usas otro campo)
+facturas_pendientes = [
+    f for f in facturas
+    if f["fields"].get("Estado", "") == "Pendiente"
+    and f["fields"].get("Cliente", "") == cliente.get("Nombre", "")
+]
+if not facturas_pendientes:
+    st.info("Este cliente no tiene facturas pendientes.")
     st.stop()
 
-factura_nos = [f['fields'].get('Factura No.', '') for f in facturas_cliente]
-factura_idx = st.selectbox("Seleccione Factura No. pendiente", range(len(factura_nos)), format_func=lambda x: factura_nos[x])
-factura = facturas_cliente[factura_idx]["fields"]
+# Seleccionar factura pendiente
+factura_labels = [
+    f'{f["fields"].get("Factura No.", "")} - {f["fields"].get("Fecha + Hora", "")}'
+    for f in facturas_pendientes
+]
+factura_idx = st.selectbox("Seleccione Factura Pendiente", range(len(facturas_pendientes)), format_func=lambda x: factura_labels[x])
+factura = facturas_pendientes[factura_idx]["fields"]
+factura_no = factura.get("Factura No.", "")
 
-factura_no = factura.get('Factura No.', '')
-fecha_emision = factura.get("Fecha + Hora", datetime.today().strftime("%Y-%m-%d"))
-
-st.text_input("Factura No.", value=factura_no, disabled=True)
-st.text_input("Fecha Emisión", value=fecha_emision, disabled=True)
-medio_pago = st.selectbox("Medio de Pago", ["Efectivo", "Débito", "Crédito"], index=["Efectivo", "Débito", "Crédito"].index(factura.get("Medio de Pago","Efectivo")))
-
-# ========= AGREGAR PRODUCTOS AUTOMÁTICAMENTE =========
-items = []
-for lf in lineas_factura:
-    if lf["fields"].get("Factura No.", "") == factura_no:
-        items.append({
-            "codigo": lf["fields"].get("Código", ""),
-            "descripcion": lf["fields"].get("Descripción", ""),
-            "cantidad": lf["fields"].get("Cantidad", 0),
-            "precioUnitario": float(str(lf["fields"].get("Precio Unitario", 0)).replace("$", "")),
-            "valorITBMS": float(lf["fields"].get("ITBMS", 0)),
-        })
+# -------------- AGREGAR PRODUCTOS DESDE LINEAS FACTURA AUTOMATICAMENTE -----------
+# Todas las líneas asociadas a este número de factura
+items = [
+    {
+        "codigo": lf["fields"].get("Código", ""),
+        "descripcion": lf["fields"].get("Descripción", ""),
+        "cantidad": float(lf["fields"].get("Cantidad", 1)),
+        "precioUnitario": float(lf["fields"].get("Precio Unitario", 0)),
+        "valorITBMS": float(lf["fields"].get("ITBMS", 0))
+    }
+    for lf in lineas_factura
+    if str(lf["fields"].get("Factura No.", "")) == str(factura_no)
+]
 
 if not items:
-    st.warning("No hay productos agregados en la factura seleccionada.")
+    st.warning("La factura seleccionada no tiene productos asociados en la tabla de Líneas Factura.")
     st.stop()
 
 st.markdown("### Ítems de la Factura")
 for idx, i in enumerate(items):
     st.write(f"{idx+1}. {i['codigo']} | {i['descripcion']} | {i['cantidad']} | {i['precioUnitario']} | {i['valorITBMS']}")
 
+# --- Totales ---
 total_neto = sum(i["cantidad"] * i["precioUnitario"] for i in items)
 total_itbms = sum(i["valorITBMS"] for i in items)
 total_factura = total_neto + total_itbms
 
 st.write(f"**Total Neto:** {total_neto:.2f}   **ITBMS:** {total_itbms:.2f}   **Total a Pagar:** {total_factura:.2f}")
 
-# ========= ENVIAR A DGI =========
+# --- Medio de pago ---
+medio_pago = st.selectbox("Medio de Pago", ["Efectivo", "Débito", "Crédito"])
+
+# --- Emisor ---
 if "emisor" not in st.session_state:
-    st.session_state["emisor"] = factura.get("Emitido por", "")
+    st.session_state["emisor"] = ""
 st.session_state["emisor"] = st.text_input("Nombre de quien emite la factura (obligatorio)", value=st.session_state["emisor"])
 
+# --- Enviar a DGI ---
 if st.button("Enviar Factura a DGI"):
     if not st.session_state["emisor"].strip():
         st.error("Debe ingresar el nombre de quien emite la factura antes de enviarla.")
+    elif not items:
+        st.error("La factura no tiene productos asociados.")
     else:
         forma_pago = {
             "formaPagoFact": {"Efectivo": "01", "Débito": "02", "Crédito": "03"}[medio_pago],
@@ -160,7 +173,7 @@ if st.button("Enviar Factura a DGI"):
                     "envioContenedor": 1,
                     "procesoGeneracion": 1,
                     "tipoVenta": 1,
-                    "fechaEmision": fecha_emision + "T09:00:00-05:00",
+                    "fechaEmision": str(datetime.today().date()) + "T09:00:00-05:00",
                     "cliente": {
                         "tipoClienteFE": "02",
                         "tipoContribuyente": 1,
@@ -219,6 +232,7 @@ if st.button("Enviar Factura a DGI"):
             st.success(f"Respuesta: {response.text}")
         except Exception as e:
             st.error(f"Error: {str(e)}")
+
 
 
 
