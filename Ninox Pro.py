@@ -74,8 +74,7 @@ def calcular_siguiente_factura_no(facturas):
 st.sidebar.title("Menú")
 menu = st.sidebar.radio(
     "Seleccione una opción:",
-    ["Facturación"]
-
+    ["Facturación", "Ver historial"]
 
 # ================== FACTURACIÓN ======================
 if menu == "Facturación":
@@ -275,6 +274,7 @@ if menu == "Facturación":
                 st.session_state["facturas"] = obtener_facturas_actualizadas()
             except Exception as e:
                 st.error(f"Error: {str(e)}")
+
 
 
 
