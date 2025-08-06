@@ -1,18 +1,17 @@
 import streamlit as st
 import requests
 from datetime import datetime
+import os
 
-# ========== LOGIN OBLIGATORIO ==========
+# ========== LOGIN ==========
 USUARIOS = {
     "Mispanama": "Maxilo2000",
     "usuario1": "password123"
 }
-
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
-
 if not st.session_state["autenticado"]:
-    st.markdown("<h2 style='text-align:center; color:#1c6758'>Acceso a Facturación Electrónica</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align:center; color:#1c6758'>Acceso</h2>", unsafe_allow_html=True)
     usuario = st.text_input("Usuario")
     password = st.text_input("Contraseña", type="password")
     if st.button("Ingresar"):
@@ -22,12 +21,11 @@ if not st.session_state["autenticado"]:
         else:
             st.error("Usuario o contraseña incorrectos.")
     st.stop()
-
 if st.sidebar.button("Cerrar sesión"):
     st.session_state["autenticado"] = False
     st.rerun()
 
-# ======= NINOX API CONFIG ==========
+# ========== NINOX API CONFIG ==========
 API_TOKEN = "d3c82d50-60d4-11f0-9dd2-0154422825e5"
 TEAM_ID = "6dA5DFvfDTxCQxpDF"
 DATABASE_ID = "yoq1qy9euurq"
@@ -68,10 +66,7 @@ def calcular_siguiente_factura_no(facturas):
             continue
     return f"{max_factura + 1:08d}"
 
-# ==================== APP ====================
-st.set_page_config(page_title="Factura Electrónica Ninox + DGI", layout="centered")
-st.title("Factura Electrónica")
-
+# ========== CARGA DE DATOS ==========
 if st.button("Actualizar datos de Ninox"):
     st.session_state.pop("clientes", None)
     st.session_state.pop("productos", None)
@@ -95,7 +90,8 @@ if not productos:
     st.warning("No hay productos en Ninox")
     st.stop()
 
-# ========== CLIENTES ==========
+# ========== SELECCIÓN DE CLIENTE ==========
+st.header("Datos del Cliente")
 nombres_clientes = [c['fields']['Nombre'] for c in clientes]
 cliente_idx = st.selectbox("Seleccione Cliente", range(len(nombres_clientes)), format_func=lambda x: nombres_clientes[x])
 cliente = clientes[cliente_idx]["fields"]
@@ -109,27 +105,24 @@ with col2:
     st.text_input("Teléfono", value=cliente.get('Teléfono', ''), disabled=True)
     st.text_input("Correo", value=cliente.get('Correo', ''), disabled=True)
 
-# ========== FACTURAS PENDIENTES ==========
+# ========== FACTURAS ==========
 facturas_pendientes = [
     f for f in facturas
     if f["fields"].get("Estado", "").strip().lower() == "pendiente"
 ]
-
 if facturas_pendientes:
     opciones_facturas = [f['fields'].get("Factura No.", "") for f in facturas_pendientes]
     idx_factura = st.selectbox("Seleccione Factura Pendiente", range(len(opciones_facturas)), format_func=lambda x: opciones_facturas[x])
     factura_no_preview = opciones_facturas[idx_factura]
 else:
     factura_no_preview = calcular_siguiente_factura_no(facturas)
-
 st.text_input("Factura No.", value=factura_no_preview, disabled=True)
 fecha_emision = st.date_input("Fecha Emisión", value=datetime.today())
 
 # ========== AGREGAR PRODUCTOS ==========
+st.header("Agregar Productos a la Factura")
 if 'items' not in st.session_state:
     st.session_state['items'] = []
-
-st.markdown("### Agregar Productos a la Factura")
 nombres_productos = [f"{p['fields'].get('Código','')} | {p['fields'].get('Descripción','')}" for p in productos]
 prod_idx = st.selectbox("Producto", range(len(nombres_productos)), format_func=lambda x: nombres_productos[x])
 prod_elegido = productos[prod_idx]['fields']
@@ -140,9 +133,8 @@ if st.button("Agregar ítem"):
         "descripcion": prod_elegido.get('Descripción', ''),
         "cantidad": cantidad,
         "precioUnitario": float(prod_elegido.get('Precio Unitario', 0)),
-        "valorITBMS": float(prod_elegido.get('ITBMS', 0))
+        "valorITBMS": float(prod_elegido.get('ITBMS', 0)) * cantidad
     })
-
 if st.session_state['items']:
     st.write("#### Ítems de la factura")
     for idx, i in enumerate(st.session_state['items']):
@@ -157,13 +149,9 @@ total_factura = total_neto + total_itbms
 st.write(f"**Total Neto:** {total_neto:.2f}   **ITBMS:** {total_itbms:.2f}   **Total a Pagar:** {total_factura:.2f}")
 
 medio_pago = st.selectbox("Medio de Pago", ["Efectivo", "Débito", "Crédito"])
+emisor = st.text_input("Nombre de quien emite la factura (obligatorio)", value=st.session_state.get("emisor", ""))
 
-# ========== EMISOR ==========
-if "emisor" not in st.session_state:
-    st.session_state["emisor"] = ""
-st.session_state["emisor"] = st.text_input("Nombre de quien emite la factura (obligatorio)", value=st.session_state["emisor"])
-
-# ========== ENVIAR A DGI ==========
+# ========== ENVIAR FACTURA ==========
 def obtener_facturas_actualizadas():
     url = f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/Facturas/records"
     headers = {"Authorization": f"Bearer {API_TOKEN}"}
@@ -172,23 +160,15 @@ def obtener_facturas_actualizadas():
         return r.json()
     return []
 
+# Endpoint base de tu backend
+BACKEND_URL = "https://ninox-factory-server.onrender.com"
+
 if st.button("Enviar Factura a DGI"):
-    if not st.session_state["emisor"].strip():
+    if not emisor.strip():
         st.error("Debe ingresar el nombre de quien emite la factura antes de enviarla.")
     elif not st.session_state['items']:
         st.error("Debe agregar al menos un producto.")
     else:
-        facturas_actualizadas = obtener_facturas_actualizadas()
-        # Si sigue habiendo pendientes, usa la seleccionada, si no, correlativo nuevo
-        facturas_pendientes = [
-            f for f in facturas_actualizadas
-            if f["fields"].get("Estado", "").strip().lower() == "pendiente"
-        ]
-        if facturas_pendientes:
-            factura_no_final = [f['fields'].get("Factura No.", "") for f in facturas_pendientes][0]
-        else:
-            factura_no_final = calcular_siguiente_factura_no(facturas_actualizadas)
-
         forma_pago = {
             "formaPagoFact": {"Efectivo": "01", "Débito": "02", "Crédito": "03"}[medio_pago],
             "valorCuotaPagada": f"{total_factura:.2f}"
@@ -199,8 +179,8 @@ if st.button("Enviar Factura a DGI"):
                 "tipoSucursal": "1",
                 "datosTransaccion": {
                     "tipoEmision": "01",
-                    "tipoDocumento": "01",  # Aquí puedes cambiar a "03" si es nota de crédito
-                    "numeroDocumentoFiscal": factura_no_final,
+                    "tipoDocumento": "01",
+                    "numeroDocumentoFiscal": factura_no_preview,
                     "puntoFacturacionFiscal": "001",
                     "naturalezaOperacion": "01",
                     "tipoOperacion": 1,
@@ -261,19 +241,63 @@ if st.button("Enviar Factura a DGI"):
                 }
             }
         }
-
-        st.write("JSON enviado:")
-        st.json(payload)
-        url = "https://ninox-factory-server.onrender.com/enviar-factura"
+        url = BACKEND_URL + "/enviar-factura"
         try:
             response = requests.post(url, json=payload)
-            st.success(f"Respuesta: {response.text}")
-            st.session_state['items'] = []
-            st.session_state["facturas"] = obtener_facturas_actualizadas()
+            if response.ok:
+                st.success(f"Respuesta: {response.text}")
+                st.session_state['items'] = []
+                st.session_state["facturas"] = obtener_facturas_actualizadas()
+                st.session_state["ultima_factura_no"] = factura_no_preview  # Guarda el número para descargar
+            else:
+                st.error("Error al enviar la factura.")
+                try:
+                    st.write(response.json())
+                except Exception:
+                    st.write(response.text)
         except Exception as e:
             st.error(f"Error: {str(e)}")
 
+# ========== DESCARGAR PDF ==========
+st.markdown("---")
+st.header("Descargar PDF de la Factura Electrónica")
 
+factura_para_pdf = st.text_input("Factura No. para PDF", value=st.session_state.get("ultima_factura_no", factura_no_preview))
+
+payload_pdf = {
+    "documento": {
+        "codigoSucursalEmisor": "0000",
+        "numeroDocumentoFiscal": factura_para_pdf,
+        "puntoFacturacionFiscal": "001",
+        "tipoDocumento": "01",
+        "tipoEmision": "01",
+        "serialDispositivo": ""
+    }
+}
+
+if st.button("Descargar PDF de esta factura"):
+    url = BACKEND_URL + "/descargar-pdf"
+    try:
+        with requests.post(url, json=payload_pdf, stream=True) as response:
+            if response.ok and response.headers.get("content-type") == "application/pdf":
+                pdf_bytes = response.content
+                pdf_name = f"Factura_{factura_para_pdf}.pdf"
+                st.download_button(
+                    label="Descargar PDF",
+                    data=pdf_bytes,
+                    file_name=pdf_name,
+                    mime="application/pdf"
+                )
+                st.success("PDF descargado correctamente.")
+            else:
+                st.error("No se pudo descargar el PDF.")
+                try:
+                    error_data = response.json()
+                    st.write(error_data)
+                except Exception:
+                    st.write(response.text)
+    except Exception as e:
+        st.error(f"Error de conexión: {str(e)}")
 
 
 
