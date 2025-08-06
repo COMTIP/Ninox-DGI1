@@ -78,6 +78,7 @@ if not clientes:
 nombres_clientes = [c['fields']['Nombre'] for c in clientes]
 cliente_idx = st.selectbox("Seleccione Cliente", range(len(nombres_clientes)), format_func=lambda x: nombres_clientes[x])
 cliente = clientes[cliente_idx]["fields"]
+cliente_id = clientes[cliente_idx]["id"]   # <--- ESTA ES LA CLAVE
 
 col1, col2 = st.columns(2)
 with col1:
@@ -89,11 +90,11 @@ with col2:
     st.text_input("Correo", value=cliente.get('Correo', ''), disabled=True)
 
 # ------------- FILTRAR FACTURAS PENDIENTES DEL CLIENTE -----------------
-# (Relacionando por "Nombre" en Cliente y en Factura, o cambia aquí si usas otro campo)
+# Ahora compara el campo "Cliente" de Facturas (probablemente es el ID) con cliente_id
 facturas_pendientes = [
     f for f in facturas
     if f["fields"].get("Estado", "") == "Pendiente"
-    and f["fields"].get("Cliente", "") == cliente.get("Nombre", "")
+    and str(f["fields"].get("Cliente", "")) == str(cliente_id)
 ]
 if not facturas_pendientes:
     st.info("Este cliente no tiene facturas pendientes.")
@@ -109,7 +110,6 @@ factura = facturas_pendientes[factura_idx]["fields"]
 factura_no = factura.get("Factura No.", "")
 
 # -------------- AGREGAR PRODUCTOS DESDE LINEAS FACTURA AUTOMATICAMENTE -----------
-# Todas las líneas asociadas a este número de factura
 items = [
     {
         "codigo": lf["fields"].get("Código", ""),
@@ -232,6 +232,8 @@ if st.button("Enviar Factura a DGI"):
             st.success(f"Respuesta: {response.text}")
         except Exception as e:
             st.error(f"Error: {str(e)}")
+
+
 
 
 
