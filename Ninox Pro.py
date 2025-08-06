@@ -227,13 +227,13 @@ if st.button("Enviar Factura a DGI"):
         }
         st.write("JSON enviado:")
         st.json(payload)
-    
         url = "https://ninox-factory-server.onrender.com/enviar-factura"
         try:
             response = requests.post(url, json=payload)
             st.success(f"Respuesta: {response.text}")
         except Exception as e:
             st.error(f"Error: {str(e)}")
+
 
 
 
