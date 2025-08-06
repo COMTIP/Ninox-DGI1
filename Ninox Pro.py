@@ -220,6 +220,7 @@ if st.button("Enviar Factura a DGI"):
                         "direccion": cliente.get('Dirección', ''),
                         "telefono1": cliente.get('Teléfono', ''),
                         "correoElectronico1": cliente.get('Correo', ''),
+                        "correoElectronico2": "biomedical@iompanama.com",
                         "pais": "PA"
                     }
                 },
@@ -272,6 +273,7 @@ if st.button("Enviar Factura a DGI"):
             st.session_state["facturas"] = obtener_facturas_actualizadas()
         except Exception as e:
             st.error(f"Error: {str(e)}")
+
 
 
 
