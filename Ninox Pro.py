@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
-import pandas as pd
 from datetime import datetime
+import pandas as pd
 from io import BytesIO
 
 # ========== LOGIN OBLIGATORIO ==========
@@ -106,13 +106,8 @@ if menu == "Facturación":
         st.warning("No hay productos en Ninox")
         st.stop()
 
-    # =================== CLIENTES (todos) ===================
-    st.subheader("Listado de Clientes")
-    df_clientes = pd.DataFrame([c['fields'] for c in clientes])
-    st.dataframe(df_clientes, use_container_width=True)
-
     # Selección de Cliente
-    nombres_clientes = [c['fields'].get('Nombre','Sin Nombre') for c in clientes]
+    nombres_clientes = [c['fields']['Nombre'] for c in clientes]
     cliente_idx = st.selectbox("Seleccione Cliente", range(len(nombres_clientes)), format_func=lambda x: nombres_clientes[x])
     cliente = clientes[cliente_idx]["fields"]
 
@@ -129,11 +124,6 @@ if menu == "Facturación":
     factura_no_preview = calcular_siguiente_factura_no(facturas)
     st.text_input("Factura No.", value=factura_no_preview, disabled=True)
     fecha_emision = st.date_input("Fecha Emisión", value=datetime.today())
-
-    # =================== PRODUCTOS (todos) ===================
-    st.subheader("Tabla de Productos")
-    df_productos = pd.DataFrame([p["fields"] for p in productos])
-    st.dataframe(df_productos, use_container_width=True)
 
     # --- AGREGAR PRODUCTOS (Items) ---
     if 'items' not in st.session_state:
@@ -169,6 +159,7 @@ if menu == "Facturación":
 
     medio_pago = st.selectbox("Medio de Pago", ["Efectivo", "Débito", "Crédito"])
 
+    # ----------- EMISOR OBLIGATORIO SOLO PARA HISTORIAL ----------
     if "emisor" not in st.session_state:
         st.session_state["emisor"] = ""
     st.session_state["emisor"] = st.text_input("Nombre de quien emite la factura (obligatorio)", value=st.session_state["emisor"])
@@ -188,6 +179,7 @@ if menu == "Facturación":
         elif not st.session_state['items']:
             st.error("Debe agregar al menos un producto.")
         else:
+            # Refresca el correlativo real antes de enviar
             facturas_actualizadas = obtener_facturas_actualizadas()
             factura_no_final = calcular_siguiente_factura_no(facturas_actualizadas)
             forma_pago = {
@@ -266,33 +258,25 @@ if menu == "Facturación":
             st.json(payload)
             url = "https://ninox-factory-server.onrender.com/enviar-factura"
             try:
-                # Descomenta para hacer el POST real:
-                # response = requests.post(url, json=payload)
-                # st.success(f"Respuesta: {response.text}")
-                st.success("Factura lista para enviar (simulado).")
-                st.session_state['items'] = []
+                response = requests.post(url, json=payload)
+                st.success(f"Respuesta: {response.text}")
+                # Guarda en historial local para tu control
+                if "historial" not in st.session_state:
+                    st.session_state["historial"] = []
+                st.session_state["historial"].append({
+                    "Factura No.": factura_no_final,
+                    "Cliente": cliente.get("Nombre", ""),
+                    "Fecha": str(fecha_emision),
+                    "Total Neto": f"{total_neto:.2f}",
+                    "Medio de Pago": medio_pago,
+                    "Emitido por": st.session_state["emisor"]
+                })
+                # Refresca facturas
                 st.session_state["facturas"] = obtener_facturas_actualizadas()
             except Exception as e:
                 st.error(f"Error: {str(e)}")
 
-# ================== HISTORIAL =======================
-elif menu == "Ver historial":
-    st.title("Historial de facturas enviadas")
-    historial = st.session_state.get("historial", [])
-    if not historial:
-        st.info("No hay facturas enviadas en esta sesión.")
-    else:
-        df = pd.DataFrame(historial)
-        st.dataframe(df, use_container_width=True)
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False)
-        st.download_button(
-            label="Descargar historial en Excel",
-            data=output.getvalue(),
-            file_name='historial_facturas.xlsx',
-            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        )
+
 
 
 
