@@ -269,9 +269,9 @@ payload_pdf = {
         "codigoSucursalEmisor": "0000",
         "numeroDocumentoFiscal": factura_para_pdf,
         "puntoFacturacionFiscal": "001",
+        "serialDispositivo": "",
         "tipoDocumento": "01",
-        "tipoEmision": "01",
-        "serialDispositivo": ""
+        "tipoEmision": "01"
     }
 }
 
@@ -298,6 +298,7 @@ if st.button("Descargar PDF de esta factura"):
                     st.write(response.text)
     except Exception as e:
         st.error(f"Error de conexión: {str(e)}")
+
 
 
 
