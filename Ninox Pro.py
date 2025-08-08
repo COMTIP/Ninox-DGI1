@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 from datetime import datetime
 
-# ========== LOGIN ==========
+# ================== LOGIN ==================
 USUARIOS = {"Mispanama": "Maxilo2000", "usuario1": "password123"}
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
@@ -21,15 +21,24 @@ if st.sidebar.button("Cerrar sesión"):
     st.session_state["autenticado"] = False
     st.rerun()
 
-# ========== CONFIG ==========
+# ================== CONFIG ==================
 API_TOKEN = "d3c82d50-60d4-11f0-9dd2-0154422825e5"
 TEAM_ID = "6dA5DFvfDTxCQxpDF"
 DATABASE_ID = "yoq1qy9euurq"
 
+BACKEND_URL = st.sidebar.text_input(
+    "BACKEND_URL",
+    value="https://ninox-factory-server.onrender.com",  # ajusta si usas otro host o subruta
+)
+
+# ================== HELPERS NINOX ==================
 def _get(url):
     headers = {"Authorization": f"Bearer {API_TOKEN}"}
-    r = requests.get(url, headers=headers, timeout=30)
-    return r.json() if r.ok else []
+    try:
+        r = requests.get(url, headers=headers, timeout=30)
+        return r.json() if r.ok else []
+    except Exception:
+        return []
 
 def obtener_clientes():
     return _get(f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/Clientes/records")
@@ -45,16 +54,14 @@ def calcular_siguiente_factura_no(facturas):
     for f in facturas:
         try:
             n = int(f.get("fields", {}).get("Factura No.", "") or 0)
-            if n > max_fact: max_fact = n
-        except: pass
+            max_fact = max(max_fact, n)
+        except:
+            pass
     return f"{max_fact + 1:08d}"
 
-# Backend URL (ajústalo)
-BACKEND_URL = st.sidebar.text_input("BACKEND_URL", value="https://ninox-factory-server.onrender.com")
-
-# ========== CARGA DATOS ==========
+# ================== CARGA DE DATOS ==================
 if st.button("Actualizar datos de Ninox"):
-    for k in ("clientes","productos","facturas"):
+    for k in ("clientes", "productos", "facturas"):
         st.session_state.pop(k, None)
 
 if "clientes" not in st.session_state:
@@ -73,9 +80,9 @@ if not clientes:
 if not productos:
     st.warning("No hay productos en Ninox"); st.stop()
 
-# ========== CLIENTE ==========
+# ================== CLIENTE ==================
 st.header("Datos del Cliente")
-nombres = [c['fields'].get('Nombre', f"Cliente {i}") for i,c in enumerate(clientes)]
+nombres = [c['fields'].get('Nombre', f"Cliente {i}") for i, c in enumerate(clientes)]
 idx = st.selectbox("Seleccione Cliente", range(len(nombres)), format_func=lambda x: nombres[x])
 cliente = clientes[idx]["fields"]
 
@@ -88,12 +95,11 @@ with c2:
     st.text_input("Teléfono", value=cliente.get('Teléfono',''), disabled=True)
     st.text_input("Correo", value=cliente.get('Correo',''), disabled=True)
 
-# ========== FACTURAS ==========
-# (opcional) filtra pendientes por cliente
+# ================== FACTURAS ==================
+# (Opcional) filtra pendientes del cliente actual si guardas esa relación en Ninox
 pendientes = [
     f for f in facturas
-    if f.get("fields", {}).get("Estado","").strip().lower()=="pendiente"
-    and (f.get("fields", {}).get("Cliente") == cliente.get("Nombre") if "Cliente" in f.get("fields", {}) else True)
+    if f.get("fields", {}).get("Estado","").strip().lower() == "pendiente"
 ]
 if pendientes:
     opciones = [f.get("fields", {}).get("Factura No.","") for f in pendientes]
@@ -105,14 +111,14 @@ else:
 st.text_input("Factura No.", value=factura_no_preview, disabled=True)
 fecha_emision = st.date_input("Fecha Emisión", value=datetime.today())
 
-# ========== ÍTEMS ==========
+# ================== ÍTEMS ==================
 st.header("Agregar Productos a la Factura")
-if "items" not in st.session_state:
-    st.session_state["items"] = []
+if "items" not in st.session_state: st.session_state["items"] = []
 
 nombres_prod = [f"{p['fields'].get('Código','')} | {p['fields'].get('Descripción','')}" for p in productos]
 pidx = st.selectbox("Producto", range(len(nombres_prod)), format_func=lambda x: nombres_prod[x])
 prod = productos[pidx]["fields"]
+
 cantidad = st.number_input("Cantidad", min_value=1.0, value=1.0, step=1.0)
 
 if st.button("Agregar ítem"):
@@ -135,15 +141,15 @@ if st.session_state["items"]:
     if st.button("Limpiar Ítems"):
         st.session_state["items"] = []
 
-total_neto   = round(sum(i["cantidad"]*i["precioUnitario"] for i in st.session_state["items"]), 2)
-total_itbms  = round(sum(i["valorITBMS"] for i in st.session_state["items"]), 2)
-total_factura= round(total_neto + total_itbms, 2)
+total_neto    = round(sum(i["cantidad"]*i["precioUnitario"] for i in st.session_state["items"]), 2)
+total_itbms   = round(sum(i["valorITBMS"] for i in st.session_state["items"]), 2)
+total_factura = round(total_neto + total_itbms, 2)
 st.write(f"**Total Neto:** {total_neto:.2f}   **ITBMS:** {total_itbms:.2f}   **Total a Pagar:** {total_factura:.2f}")
 
 medio_pago = st.selectbox("Medio de Pago", ["Efectivo","Débito","Crédito"])
 emisor = st.text_input("Nombre de quien emite la factura (obligatorio)", value=st.session_state.get("emisor",""))
 
-# ========== ENVIAR ==========
+# ================== ENVIAR ==================
 def refresh_facturas():
     st.session_state["facturas"] = obtener_facturas()
 
@@ -218,6 +224,7 @@ if st.button("Enviar Factura a DGI"):
                 }
             }
         }
+
         try:
             with st.spinner("Enviando..."):
                 resp = requests.post(f"{BACKEND_URL}/enviar-factura", json=payload, timeout=60)
@@ -235,20 +242,20 @@ if st.button("Enviar Factura a DGI"):
                         st.session_state["ultima_factura_uuid"] = uid
                         st.info(f"UUID guardado: {uid}")
                     else:
-                        st.warning("No se recibió UUID.")
+                        st.warning("No se recibió UUID en la respuesta.")
                 else:
-                    st.error("Error en envío.")
+                    st.error("Respuesta de envío no OK.")
                     st.write(data)
                 st.session_state["items"] = []
                 st.session_state["ultima_factura_no"] = factura_no_preview
-                refresh_facturas()
+                st.session_state["facturas"] = obtener_facturas()
             else:
                 st.error(f"Error HTTP {resp.status_code}")
                 st.text(resp.text)
         except Exception as e:
             st.error(f"Error: {e}")
 
-# ========== DESCARGAR PDF ==========
+# ================== DESCARGAR PDF ==================
 st.markdown("---")
 st.header("Descargar PDF de la Factura Electrónica")
 
@@ -256,10 +263,12 @@ uid = st.session_state.get("ultima_factura_uuid","")
 if uid:
     st.text_input("UUID de la última factura", value=uid, disabled=True)
 
-factura_para_pdf = st.text_input("Factura No. (fallback si no hay UUID)", value=st.session_state.get("ultima_factura_no", ""))
+factura_para_pdf = st.text_input("Factura No. (fallback si no hay UUID)",
+                                 value=st.session_state.get("ultima_factura_no", ""))
 
 if st.button("Descargar PDF (por UUID si hay, si no por número)"):
     try:
+        ok_uuid = False
         # 1) Preferido: UUID
         if uid:
             payload_uuid = {"uuid": uid, "documento": {"tipoDocumento": "01"}}
@@ -268,12 +277,13 @@ if st.button("Descargar PDF (por UUID si hay, si no por número)"):
             if r.ok and r.headers.get("content-type","").startswith("application/pdf"):
                 st.download_button("Descargar PDF", r.content, file_name=f"Factura_{uid}.pdf", mime="application/pdf")
                 st.success("PDF descargado (UUID).")
+                ok_uuid = True
             else:
                 st.warning("Fallo por UUID. Probando por número...")
                 st.text(r.text)
 
         # 2) Fallback: número
-        if not uid or not r.ok:
+        if not ok_uuid:
             payload_num = {
                 "datosDocumento": {
                     "codigoSucursalEmisor": "0000",
@@ -294,6 +304,7 @@ if st.button("Descargar PDF (por UUID si hay, si no por número)"):
                 st.text(r2.text)
     except Exception as e:
         st.error(f"Error de conexión: {e}")
+
 
 
 
