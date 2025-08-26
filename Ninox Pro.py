@@ -22,9 +22,9 @@ if st.sidebar.button("Cerrar sesión"):
     st.rerun()
 
 # ================== CONFIG ==================
-API_TOKEN = "d3c82d50-60d4-11f0-9dd2-0154422825e5"
-TEAM_ID = "6dA5DFvfDTxCQxpDF"
-DATABASE_ID = "yoq1qy9euurq"
+API_TOKEN = "0b3a1130-785a-11f0-ace0-3fb1fcb242e2"
+TEAM_ID = "ihp8o8AaLzfodwc4J"
+DATABASE_ID = "u2g01uaua8tu"
 
 BACKEND_URL = st.sidebar.text_input(
     "BACKEND_URL",
@@ -304,6 +304,7 @@ if st.button("Descargar PDF (por UUID si hay, si no por número)"):
                 st.text(r2.text)
     except Exception as e:
         st.error(f"Error de conexión: {e}")
+
 
 
 
