@@ -1,11 +1,21 @@
 import streamlit as st
 import requests
-from datetime import datetime
+from datetime import date
+from typing import List, Dict, Any
 
-# ================== LOGIN ==================
-USUARIOS = {"Mispanama": "Maxilo2000", "usuario1": "password123"}
+# ==========================
+# CONFIGURACIÓN / LOGIN
+# ==========================
+st.set_page_config(page_title="Facturación Electrónica — IOM Panamá", layout="centered")
+
+USUARIOS = {
+    "Mispanama": "Maxilo2000",
+    "usuario1": "password123",
+}
+
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
+
 if not st.session_state["autenticado"]:
     st.markdown("<h2 style='text-align:center; color:#1c6758'>Acceso</h2>", unsafe_allow_html=True)
     usuario = st.text_input("Usuario")
@@ -17,49 +27,67 @@ if not st.session_state["autenticado"]:
         else:
             st.error("Usuario o contraseña incorrectos.")
     st.stop()
+
 if st.sidebar.button("Cerrar sesión"):
     st.session_state["autenticado"] = False
     st.rerun()
 
-# ================== CONFIG ==================
-API_TOKEN = "0b3a1130-785a-11f0-ace0-3fb1fcb242e2"
-TEAM_ID = "ihp8o8AaLzfodwc4J"
+# ==========================
+# NINOX API CONFIG
+# ==========================
+API_TOKEN   = "0b3a1130-785a-11f0-ace0-3fb1fcb242e2"
+TEAM_ID     = "ihp8o8AaLzfodwc4J"
 DATABASE_ID = "u2g01uaua8tu"
 
-BACKEND_URL = st.sidebar.text_input(
-    "BACKEND_URL",
-    value="https://ninox-factory-server.onrender.com",  # ajusta si usas otro host o subruta
-)
+BASE_URL = f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}"
+HEADERS  = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
 
-# ================== HELPERS NINOX ==================
-def _get(url):
-    headers = {"Authorization": f"Bearer {API_TOKEN}"}
-    try:
-        r = requests.get(url, headers=headers, timeout=30)
-        return r.json() if r.ok else []
-    except Exception:
-        return []
+# ==========================
+# UTILIDADES NINOX
+# ==========================
+def _ninox_get(path: str, params: Dict[str, Any] | None = None, page_size: int = 200) -> List[Dict[str, Any]]:
+    """Descarga todos los registros de una tabla Ninox con paginación."""
+    out: List[Dict[str, Any]] = []
+    offset = 0
+    while True:
+        q = dict(params or {})
+        q.update({"limit": page_size, "offset": offset})
+        url = f"{BASE_URL}{path}"
+        r = requests.get(url, headers=HEADERS, params=q, timeout=30)
+        if not r.ok:
+            st.error(f"Error Ninox GET {path}: {r.status_code} — {r.text}")
+            break
+        batch = r.json() or []
+        out.extend(batch)
+        if len(batch) < page_size:
+            break
+        offset += page_size
+    return out
 
-def obtener_clientes():
-    return _get(f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/Clientes/records")
+def obtener_clientes() -> List[Dict[str, Any]]:
+    return _ninox_get("/tables/Clientes/records")
 
-def obtener_productos():
-    return _get(f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/Productos/records")
+def obtener_productos() -> List[Dict[str, Any]]:
+    return _ninox_get("/tables/Productos/records")
 
-def obtener_facturas():
-    return _get(f"https://api.ninox.com/v1/teams/{TEAM_ID}/databases/{DATABASE_ID}/tables/Facturas/records")
+def obtener_facturas() -> List[Dict[str, Any]]:
+    return _ninox_get("/tables/Facturas/records")
 
-def calcular_siguiente_factura_no(facturas):
-    max_fact = 0
+def calcular_siguiente_factura_no(facturas: List[Dict[str, Any]]) -> str:
+    max_factura = 0
     for f in facturas:
+        valor = (f.get("fields", {}) or {}).get("Factura No.", "")
         try:
-            n = int(f.get("fields", {}).get("Factura No.", "") or 0)
-            max_fact = max(max_fact, n)
-        except:
-            pass
-    return f"{max_fact + 1:08d}"
+            n = int(str(valor).strip() or 0)
+            if n > max_factura:
+                max_factura = n
+        except Exception:
+            continue
+    return f"{max_factura + 1:08d}"
 
-# ================== CARGA DE DATOS ==================
+# ==========================
+# CARGA / REFRESCO DE DATOS
+# ==========================
 if st.button("Actualizar datos de Ninox"):
     for k in ("clientes", "productos", "facturas"):
         st.session_state.pop(k, None)
@@ -71,240 +99,284 @@ if "productos" not in st.session_state:
 if "facturas" not in st.session_state:
     st.session_state["facturas"] = obtener_facturas()
 
-clientes = st.session_state["clientes"]
+clientes  = st.session_state["clientes"]
 productos = st.session_state["productos"]
 facturas  = st.session_state["facturas"]
 
 if not clientes:
-    st.warning("No hay clientes en Ninox"); st.stop()
+    st.warning("No hay clientes en Ninox")
+    st.stop()
 if not productos:
-    st.warning("No hay productos en Ninox"); st.stop()
+    st.warning("No hay productos en Ninox")
+    st.stop()
 
-# ================== CLIENTE ==================
+# ==========================
+# MIGRACIÓN/INICIALIZACIÓN DE ÍTEMS
+# ==========================
+# Evita colisión con el método dict.items()
+if "line_items" not in st.session_state:
+    prev = st.session_state.get("items", [])
+    st.session_state["line_items"] = prev if isinstance(prev, list) else []
+    st.session_state.pop("items", None)
+
+# ==========================
+# SELECCIÓN DE CLIENTE
+# ==========================
 st.header("Datos del Cliente")
-nombres = [c['fields'].get('Nombre', f"Cliente {i}") for i, c in enumerate(clientes)]
-idx = st.selectbox("Seleccione Cliente", range(len(nombres)), format_func=lambda x: nombres[x])
-cliente = clientes[idx]["fields"]
 
-c1, c2 = st.columns(2)
-with c1:
-    st.text_input("RUC", value=cliente.get('RUC',''), disabled=True)
-    st.text_input("DV", value=cliente.get('DV',''), disabled=True)
-    st.text_area("Dirección", value=cliente.get('Dirección',''), disabled=True)
-with c2:
-    st.text_input("Teléfono", value=cliente.get('Teléfono',''), disabled=True)
-    st.text_input("Correo", value=cliente.get('Correo',''), disabled=True)
+nombres_clientes = [c.get("fields", {}).get("Nombre", f"Cliente {i}") for i, c in enumerate(clientes, start=1)]
+cliente_idx = st.selectbox("Seleccione Cliente", range(len(nombres_clientes)), format_func=lambda x: nombres_clientes[x])
+cliente_fields: Dict[str, Any] = clientes[cliente_idx].get("fields", {}) or {}
 
-# ================== FACTURAS ==================
-# (Opcional) filtra pendientes del cliente actual si guardas esa relación en Ninox
-pendientes = [
-    f for f in facturas
-    if f.get("fields", {}).get("Estado","").strip().lower() == "pendiente"
-]
-if pendientes:
-    opciones = [f.get("fields", {}).get("Factura No.","") for f in pendientes]
-    idxf = st.selectbox("Seleccione Factura Pendiente", range(len(opciones)), format_func=lambda x: opciones[x])
-    factura_no_preview = opciones[idxf]
+col1, col2 = st.columns(2)
+with col1:
+    st.text_input("RUC",       value=cliente_fields.get("RUC", ""),        disabled=True)
+    st.text_input("DV",        value=cliente_fields.get("DV", ""),         disabled=True)
+    st.text_area ("Dirección", value=cliente_fields.get("Dirección", ""),  disabled=True)
+with col2:
+    st.text_input("Teléfono",  value=cliente_fields.get("Teléfono", ""),   disabled=True)
+    st.text_input("Correo",    value=cliente_fields.get("Correo", ""),     disabled=True)
+
+# ==========================
+# FACTURA EXISTENTE O NUEVA
+# ==========================
+facturas_pendientes = [f for f in facturas if (f.get("fields", {}) or {}).get("Estado", "").strip().lower() == "pendiente"]
+if facturas_pendientes:
+    opciones_facturas = [(f.get("fields", {}) or {}).get("Factura No.", "") for f in facturas_pendientes]
+    idx_factura = st.selectbox("Seleccione Factura Pendiente", range(len(opciones_facturas)), format_func=lambda x: str(opciones_facturas[x]))
+    factura_no_preview = str(opciones_facturas[idx_factura])
 else:
     factura_no_preview = calcular_siguiente_factura_no(facturas)
 
 st.text_input("Factura No.", value=factura_no_preview, disabled=True)
-fecha_emision = st.date_input("Fecha Emisión", value=datetime.today())
+fecha_emision = st.date_input("Fecha Emisión", value=date.today())
 
-# ================== ÍTEMS ==================
+# ==========================
+# ÍTEMS
+# ==========================
 st.header("Agregar Productos a la Factura")
-if "items" not in st.session_state: st.session_state["items"] = []
 
-nombres_prod = [f"{p['fields'].get('Código','')} | {p['fields'].get('Descripción','')}" for p in productos]
-pidx = st.selectbox("Producto", range(len(nombres_prod)), format_func=lambda x: nombres_prod[x])
-prod = productos[pidx]["fields"]
+nombres_productos = [
+    f"{(p.get('fields', {}) or {}).get('Código','')} | {(p.get('fields', {}) or {}).get('Descripción','')}"
+    for p in productos
+]
+prod_idx    = st.selectbox("Producto", range(len(nombres_productos)), format_func=lambda x: nombres_productos[x])
+prod_fields = productos[prod_idx].get("fields", {}) or {}
 
-cantidad = st.number_input("Cantidad", min_value=1.0, value=1.0, step=1.0)
+cantidad    = st.number_input("Cantidad", min_value=1.0, value=1.0, step=1.0)
+precio_unit = float(prod_fields.get("Precio Unitario", 0) or 0)
+itbms_rate  = float(prod_fields.get("ITBMS", 0) or 0)   # p.ej. 0.07
 
 if st.button("Agregar ítem"):
-    precio = float(prod.get("Precio Unitario", 0))
-    tasa   = float(prod.get("ITBMS", 0))  # 0.07 etc.
-    valor_itbms = round(cantidad * precio * tasa, 2)
-    st.session_state["items"].append({
-        "codigo": prod.get("Código",""),
-        "descripcion": prod.get("Descripción",""),
-        "cantidad": float(cantidad),
-        "precioUnitario": precio,
-        "tasaITBMS": tasa,
-        "valorITBMS": valor_itbms
+    valor_itbms = round(itbms_rate * cantidad * precio_unit, 2)
+    st.session_state["line_items"].append({
+        "codigo":         prod_fields.get("Código", ""),
+        "descripcion":    prod_fields.get("Descripción", ""),
+        "cantidad":       float(cantidad),
+        "precioUnitario": float(precio_unit),
+        "tasa":           float(itbms_rate),
+        "valorITBMS":     float(valor_itbms),
     })
 
-if st.session_state["items"]:
+if st.session_state["line_items"]:
     st.write("#### Ítems de la factura")
-    for i, it in enumerate(st.session_state["items"], 1):
-        st.write(f"{i}. {it['codigo']} | {it['descripcion']} | {it['cantidad']} | {it['precioUnitario']:.2f} | ITBMS {it['valorITBMS']:.2f}")
-    if st.button("Limpiar Ítems"):
-        st.session_state["items"] = []
+    for idx, i in enumerate(st.session_state["line_items"], start=1):
+        st.write(f"{idx}. {i['codigo']} | {i['descripcion']} | Cant: {i['cantidad']:.2f} | P.U.: {i['precioUnitario']:.2f} | ITBMS: {i['valorITBMS']:.2f}")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Limpiar Ítems"):
+            st.session_state["line_items"] = []
+    with c2:
+        idx_del = st.number_input("Eliminar ítem #", min_value=0, value=0, step=1)
+        if st.button("Eliminar"):
+            if 0 < idx_del <= len(st.session_state["line_items"]):
+                st.session_state["line_items"].pop(idx_del - 1)
 
-total_neto    = round(sum(i["cantidad"]*i["precioUnitario"] for i in st.session_state["items"]), 2)
-total_itbms   = round(sum(i["valorITBMS"] for i in st.session_state["items"]), 2)
-total_factura = round(total_neto + total_itbms, 2)
+# TOTALES
+total_neto    = sum(i["cantidad"] * i["precioUnitario"] for i in st.session_state["line_items"])
+total_itbms   = sum(i["valorITBMS"] for i in st.session_state["line_items"])
+total_factura = total_neto + total_itbms
+
 st.write(f"**Total Neto:** {total_neto:.2f}   **ITBMS:** {total_itbms:.2f}   **Total a Pagar:** {total_factura:.2f}")
 
-medio_pago = st.selectbox("Medio de Pago", ["Efectivo","Débito","Crédito"])
-emisor = st.text_input("Nombre de quien emite la factura (obligatorio)", value=st.session_state.get("emisor",""))
+medio_pago = st.selectbox("Medio de Pago", ["Efectivo", "Débito", "Crédito"])
+emisor     = st.text_input("Nombre de quien emite la factura (obligatorio)", value=st.session_state.get("emisor", ""))
+if emisor:
+    st.session_state["emisor"] = emisor
 
-# ================== ENVIAR ==================
-def refresh_facturas():
+# ==========================
+# BACKEND DGI
+# ==========================
+BACKEND_URL = "https://ninox-factory-server.onrender.com"
+
+if "pdf_bytes" not in st.session_state:
+    st.session_state["pdf_bytes"] = None
+    st.session_state["pdf_name"]  = None
+
+def _ninox_refrescar_facturas():
     st.session_state["facturas"] = obtener_facturas()
 
+# ==========================
+# ENVIAR A DGI
+# ==========================
 if st.button("Enviar Factura a DGI"):
     if not emisor.strip():
-        st.error("Debe ingresar el nombre de quien emite la factura.")
-    elif not st.session_state["items"]:
+        st.error("Debe ingresar el nombre de quien emite la factura antes de enviarla.")
+        st.stop()
+    if not st.session_state["line_items"]:
         st.error("Debe agregar al menos un producto.")
-    else:
-        forma_pago = {"formaPagoFact": {"Efectivo":"01","Débito":"02","Crédito":"03"}[medio_pago], "valorCuotaPagada": f"{total_factura:.2f}"}
-        payload = {
-            "documento": {
-                "codigoSucursalEmisor": "0000",
-                "tipoSucursal": "1",
-                "datosTransaccion": {
-                    "tipoEmision": "01",
-                    "tipoDocumento": "01",
-                    "numeroDocumentoFiscal": factura_no_preview,
-                    "puntoFacturacionFiscal": "001",
-                    "naturalezaOperacion": "01",
-                    "tipoOperacion": 1,
-                    "destinoOperacion": 1,
-                    "formatoCAFE": 1,
-                    "entregaCAFE": 1,
-                    "envioContenedor": 1,
-                    "procesoGeneracion": 1,
-                    "tipoVenta": 1,
-                    "fechaEmision": str(fecha_emision) + "T09:00:00-05:00",
-                    "cliente": {
-                        "tipoClienteFE": "02",
-                        "tipoContribuyente": 1,
-                        "numeroRUC": cliente.get("RUC","").replace("-",""),
-                        "digitoVerificadorRUC": cliente.get("DV",""),
-                        "razonSocial": cliente.get("Nombre",""),
-                        "direccion": cliente.get("Dirección",""),
-                        "telefono1": cliente.get("Teléfono",""),
-                        "correoElectronico1": cliente.get("Correo",""),
-                        "pais": "PA"
-                    }
+        st.stop()
+
+    forma_pago_codigo = {"Efectivo": "01", "Débito": "02", "Crédito": "03"}[medio_pago]
+
+    # Construcción de ítems payload
+    lista_items = []
+    for i in st.session_state["line_items"]:
+        precio_item = i["cantidad"] * i["precioUnitario"]
+        valor_total = precio_item + i["valorITBMS"]
+        tasa_itbms  = "01" if (i.get("tasa", 0) or 0) > 0 else "00"
+        lista_items.append({
+            "codigo":                  i["codigo"] or "0",
+            "descripcion":             i["descripcion"] or "SIN DESCRIPCIÓN",
+            "codigoGTIN":              "0",
+            "cantidad":                f"{i['cantidad']:.2f}",
+            "precioUnitario":          f"{i['precioUnitario']:.2f}",
+            "precioUnitarioDescuento": "0.00",
+            "precioItem":              f"{precio_item:.2f}",
+            "valorTotal":              f"{valor_total:.2f}",
+            "cantGTINCom":             f"{i['cantidad']:.2f}",
+            "codigoGTINInv":           "0",
+            "tasaITBMS":               tasa_itbms,
+            "valorITBMS":              f"{i['valorITBMS']:.2f}",
+            "cantGTINComInv":          f"{i['cantidad']:.2f}",
+        })
+
+    payload = {
+        "documento": {
+            "codigoSucursalEmisor": "0000",
+            "tipoSucursal": "1",
+            "datosTransaccion": {
+                "tipoEmision": "01",
+                "tipoDocumento": "01",
+                "numeroDocumentoFiscal": str(factura_no_preview),
+                "puntoFacturacionFiscal": "001",
+                "naturalezaOperacion": "01",
+                "tipoOperacion": 1,
+                "destinoOperacion": 1,
+                "formatoCAFE": 1,
+                "entregaCAFE": 1,
+                "envioContenedor": 1,
+                "procesoGeneracion": 1,
+                "tipoVenta": 1,
+                "fechaEmision": f"{fecha_emision.isoformat()}T09:00:00-05:00",
+                "cliente": {
+                    "tipoClienteFE": "02",
+                    "tipoContribuyente": 1,
+                    "numeroRUC": (cliente_fields.get("RUC", "") or "").replace("-", ""),
+                    "digitoVerificadorRUC": cliente_fields.get("DV", ""),
+                    "razonSocial": cliente_fields.get("Nombre", ""),
+                    "direccion": cliente_fields.get("Dirección", ""),
+                    "telefono1": cliente_fields.get("Teléfono", ""),
+                    "correoElectronico1": cliente_fields.get("Correo", ""),
+                    "pais": "PA",
                 },
-                "listaItems": {
-                    "item": [{
-                        "codigo": i["codigo"],
-                        "descripcion": i["descripcion"],
-                        "codigoGTIN": "0",
-                        "cantidad": f"{i['cantidad']:.2f}",
-                        "precioUnitario": f"{i['precioUnitario']:.2f}",
-                        "precioUnitarioDescuento": "0.00",
-                        "precioItem": f"{i['cantidad']*i['precioUnitario']:.2f}",
-                        "valorTotal": f"{i['cantidad']*i['precioUnitario'] + i['valorITBMS']:.2f}",
-                        "cantGTINCom": f"{i['cantidad']:.2f}",
-                        "codigoGTINInv": "0",
-                        "tasaITBMS": "01" if i["tasaITBMS"] > 0 else "00",
-                        "valorITBMS": f"{i['valorITBMS']:.2f}",
-                        "cantGTINComInv": f"{i['cantidad']:.2f}"
-                    } for i in st.session_state["items"]]
+            },
+            "listaItems": {"item": lista_items},
+            "totalesSubTotales": {
+                "totalPrecioNeto":    f"{total_neto:.2f}",
+                "totalITBMS":         f"{total_itbms:.2f}",
+                "totalMontoGravado":  f"{total_itbms:.2f}",
+                "totalDescuento":     "0.00",
+                "totalAcarreoCobrado":"0.00",
+                "valorSeguroCobrado": "0.00",
+                "totalFactura":       f"{total_factura:.2f}",
+                "totalValorRecibido": f"{total_factura:.2f}",
+                "vuelto":             "0.00",
+                "tiempoPago":         "1",
+                "nroItems":           str(len(lista_items)),
+                "totalTodosItems":    f"{total_factura:.2f}",
+                "listaFormaPago": {
+                    "formaPago": [{
+                        "formaPagoFact":    forma_pago_codigo,
+                        "valorCuotaPagada": f"{total_factura:.2f}",
+                    }]
                 },
-                "totalesSubTotales": {
-                    "totalPrecioNeto": f"{total_neto:.2f}",
-                    "totalITBMS": f"{total_itbms:.2f}",
-                    "totalMontoGravado": f"{total_itbms:.2f}",
-                    "totalDescuento": "0.00",
-                    "totalAcarreoCobrado": "0.00",
-                    "valorSeguroCobrado": "0.00",
-                    "totalFactura": f"{total_factura:.2f}",
-                    "totalValorRecibido": f"{total_factura:.2f}",
-                    "vuelto": "0.00",
-                    "tiempoPago": "1",
-                    "nroItems": str(len(st.session_state["items"])),
-                    "totalTodosItems": f"{total_factura:.2f}",
-                    "listaFormaPago": {"formaPago": [forma_pago]}
-                }
-            }
+            },
         }
+    }
 
-        try:
-            with st.spinner("Enviando..."):
-                resp = requests.post(f"{BACKEND_URL}/enviar-factura", json=payload, timeout=60)
-            if resp.ok:
-                try:
-                    data = resp.json()
-                except Exception:
-                    st.success(resp.text)
-                    data = {}
-                if data.get("ok"):
-                    st.success("Factura enviada.")
-                    st.json(data.get("respuesta", {}))
-                    uid = data.get("uuid")
-                    if uid:
-                        st.session_state["ultima_factura_uuid"] = uid
-                        st.info(f"UUID guardado: {uid}")
-                    else:
-                        st.warning("No se recibió UUID en la respuesta.")
-                else:
-                    st.error("Respuesta de envío no OK.")
-                    st.write(data)
-                st.session_state["items"] = []
-                st.session_state["ultima_factura_no"] = factura_no_preview
-                st.session_state["facturas"] = obtener_facturas()
-            else:
-                st.error(f"Error HTTP {resp.status_code}")
-                st.text(resp.text)
-        except Exception as e:
-            st.error(f"Error: {e}")
-
-# ================== DESCARGAR PDF ==================
-st.markdown("---")
-st.header("Descargar PDF de la Factura Electrónica")
-
-uid = st.session_state.get("ultima_factura_uuid","")
-if uid:
-    st.text_input("UUID de la última factura", value=uid, disabled=True)
-
-factura_para_pdf = st.text_input("Factura No. (fallback si no hay UUID)",
-                                 value=st.session_state.get("ultima_factura_no", ""))
-
-if st.button("Descargar PDF (por UUID si hay, si no por número)"):
+    # POST al backend — enviar factura
     try:
-        ok_uuid = False
-        # 1) Preferido: UUID
-        if uid:
-            payload_uuid = {"uuid": uid, "documento": {"tipoDocumento": "01"}}
-            with st.spinner("Descargando por UUID..."):
-                r = requests.post(f"{BACKEND_URL}/descargar-pdf", json=payload_uuid, stream=True, timeout=120)
-            if r.ok and r.headers.get("content-type","").startswith("application/pdf"):
-                st.download_button("Descargar PDF", r.content, file_name=f"Factura_{uid}.pdf", mime="application/pdf")
-                st.success("PDF descargado (UUID).")
-                ok_uuid = True
-            else:
-                st.warning("Fallo por UUID. Probando por número...")
-                st.text(r.text)
+        url_envio = f"{BACKEND_URL}/enviar-factura"
+        r = requests.post(url_envio, json=payload, timeout=60)
+        if r.ok:
+            st.success("Factura enviada correctamente. Generando PDF…")
+            st.session_state["line_items"] = []
+            _ninox_refrescar_facturas()
+            st.session_state["ultima_factura_no"] = str(factura_no_preview)
 
-        # 2) Fallback: número
-        if not ok_uuid:
-            payload_num = {
-                "datosDocumento": {
-                    "codigoSucursalEmisor": "0000",
-                    "numeroDocumentoFiscal": factura_para_pdf,
-                    "puntoFacturacionFiscal": "001",
-                    "serialDispositivo": "",
-                    "tipoDocumento": "01",
-                    "tipoEmision": "01"
-                }
+            # Intento de descarga PDF inmediata
+            url_pdf = f"{BACKEND_URL}/descargar-pdf"
+            pdf_payload = {
+                "codigoSucursalEmisor":  "0000",
+                "numeroDocumentoFiscal": str(factura_no_preview),
+                "puntoFacturacionFiscal":"001",
+                "tipoDocumento":         "01",
+                "tipoEmision":           "01",
+                "serialDispositivo":     "",
             }
-            with st.spinner("Descargando por número..."):
-                r2 = requests.post(f"{BACKEND_URL}/descargar-pdf", json=payload_num, stream=True, timeout=120)
-            if r2.ok and r2.headers.get("content-type","").startswith("application/pdf"):
-                st.download_button("Descargar PDF", r2.content, file_name=f"Factura_{factura_para_pdf}.pdf", mime="application/pdf")
-                st.success("PDF descargado (número).")
+            rpdf = requests.post(url_pdf, json=pdf_payload, stream=True, timeout=60)
+            ct = rpdf.headers.get("content-type", "")
+            if rpdf.ok and ct.startswith("application/pdf"):
+                st.session_state["pdf_bytes"] = rpdf.content
+                st.session_state["pdf_name"]  = f"Factura_{factura_no_preview}.pdf"
+                st.success("¡PDF generado y listo para descargar abajo!")
             else:
-                st.error("No se pudo descargar el PDF.")
-                st.text(r2.text)
+                st.session_state["pdf_bytes"] = None
+                st.session_state["pdf_name"]  = None
+                st.error("Factura enviada, pero no se pudo generar el PDF automáticamente.")
+                try:
+                    st.write(rpdf.json())
+                except Exception:
+                    st.write(rpdf.text)
+        else:
+            st.error("Error al enviar la factura.")
+            try:
+                st.write(r.json())
+            except Exception:
+                st.write(r.text)
     except Exception as e:
-        st.error(f"Error de conexión: {e}")
+        st.error(f"Error de conexión con el backend: {e}")
 
+# ==========================
+# DESCARGA PDF
+# ==========================
+if st.session_state.get("pdf_bytes") and st.session_state.get("pdf_name"):
+    st.markdown("---")
+    st.header("Descargar PDF de la Factura Electrónica")
+    st.download_button(
+        label="Descargar PDF",
+        data=st.session_state["pdf_bytes"],
+        file_name=st.session_state["pdf_name"],
+        mime="application/pdf",
+    )
+
+# ==========================
+# INFO / AYUDA
+# ==========================
+with st.expander("Ayuda / Referencias"):
+    st.markdown(
+        """
+        - Base Ninox: `Clientes`, `Productos`, `Facturas`.
+        - Campos esperados (sensibles a mayúsculas):
+          - **Clientes**: Nombre, RUC, DV, Dirección, Teléfono, Correo
+          - **Productos**: Código, Descripción, Precio Unitario, ITBMS (decimal; ej. 0.07)
+          - **Facturas**: Estado (use "Pendiente" para listar aquí), "Factura No." (numérico consecutivo)
+        - Si no hay facturas pendientes, el número se calcula como el mayor `Factura No.` + 1 (8 dígitos).
+        - Envío a DGI vía backend: `/enviar-factura` y `/descargar-pdf`.
+        - Zona horaria/CAFE: fija 09:00 -05:00.
+        """
+    )
 
 
 
